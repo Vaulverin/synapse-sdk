@@ -1,4 +1,7 @@
 import {ABIs} from "../abis";
+
+import {ChainId} from "./chainid";
+
 import {ContractInterface} from "@ethersproject/contracts";
 
 
@@ -87,4 +90,27 @@ export namespace SynapseContracts {
         bridge:     "0xAf41a65F786339e7911F4acDAD6BD49426F2Dc6b",
         bridge_zap: "0xB729B5bAD4B42f3bDd4A3518a1Cc00178cb5920a",
     });
+
+    const contractsChainIdMap: {[k: number]: SynapseContract} = {
+        [ChainId.ETH]:       Ethereum,
+        [ChainId.OPTIMISM]:  Optimism,
+        [ChainId.BSC]:       BSC,
+        [ChainId.POLYGON]:   Polygon,
+        [ChainId.FANTOM]:    Fantom,
+        [ChainId.BOBA]:      Boba,
+        [ChainId.MOONBEAM]:  Moonbeam,
+        [ChainId.MOONRIVER]: Moonriver,
+        [ChainId.ARBITRUM]:  Arbitrum,
+        [ChainId.AVALANCHE]: Avalanche,
+        [ChainId.AURORA]:    Aurora,
+        [ChainId.HARMONY]:   Harmony,
+    }
+
+    export function bridgeAddressForChain(chainId: number): string {
+        return contractsChainIdMap[chainId]?.bridge.address || ""
+    }
+
+    export function zapBridgeAddressForChain(chainId: number): string {
+        return contractsChainIdMap[chainId]?.bridge_zap.address || ""
+    }
 }

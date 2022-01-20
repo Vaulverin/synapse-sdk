@@ -5,6 +5,10 @@ import {Signer} from "@ethersproject/abstract-signer";
 import {Provider} from "@ethersproject/providers";
 import {PopulatedTransaction, ContractTransaction} from "@ethersproject/contracts";
 
+// import {arrayify} from "@ethersproject/bytes";
+// import {toUtf8Bytes} from "@ethersproject/strings"
+// import {keccak256} from "@ethersproject/keccak256";
+import ethers from "ethers";
 
 export type SignerOrProvider = Signer | Provider;
 
@@ -44,3 +48,4 @@ const CHAINID_CONTRACTS_MAP: {[c: number]: SynapseContracts.SynapseContract} = {
 
 export const contractsForChainId = (chainId: number): SynapseContracts.SynapseContract => CHAINID_CONTRACTS_MAP[chainId] ?? null
 
+export const makeKappa = (txHash: string): string => ethers.utils.solidityKeccak256(["string"], [txHash])

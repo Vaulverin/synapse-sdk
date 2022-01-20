@@ -59,7 +59,7 @@ const
     EXECUTORS_TEST_TIMEOUT = makeTimeout(180);
 
 
-describe("SynapseBridge", function() {
+describe.skip("SynapseBridge", function() {
     describe("read-only wrapper functions", function(this: Mocha.Suite) {
         describe(".bridgeVersion()", function(this: Mocha.Suite) {
             const expected = 6;
@@ -520,7 +520,7 @@ function executeTransaction(
         .catch((err: any) => doneWithError(err, done))
 }
 
-describe("SynapseBridge token bridge tests", async function(this: Mocha.Suite) {
+describe.skip("SynapseBridge token bridge tests", async function(this: Mocha.Suite) {
     const
         tokenFrom      = Tokens.ETH,
         tokenTo        = Tokens.WETH_E,

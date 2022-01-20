@@ -22,7 +22,7 @@ import {BigNumber, BigNumberish} from "@ethersproject/bignumber";
 
 const bridgeTestPrivkey: string = "53354287e3023f0629b7a5e187aa1ca3458c4b7ff9d66a6e3f4b2e821aafded7";
 
-describe("ERC20 tests", function(this: Mocha.Suite) {
+describe.skip("ERC20 tests", function(this: Mocha.Suite) {
     const testAddr: string = "0xe972647539816442e0987817DF777a9fd9878650";
 
     const tokenParams = (c: number): ERC20.ERC20TokenParams => ({
