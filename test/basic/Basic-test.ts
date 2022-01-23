@@ -1,5 +1,5 @@
 import {expect} from "chai";
-import {before, Done} from "mocha";
+import {before, Done, Context} from "mocha";
 
 import {
     ChainId,
@@ -7,8 +7,8 @@ import {
     NetworkSwappableTokensMap,
     networkSwapTokensMap,
     allNetworksSwapTokensMap,
-    BaseToken,
     Tokens,
+    Token,
 } from "../../src";
 
 describe("Basic tests", function(this: Mocha.Suite) {
@@ -32,7 +32,7 @@ describe("Basic tests", function(this: Mocha.Suite) {
             resB = networkSwapTokensMap(chainA),
             resC = allNetworksSwapTokensMap();
 
-        const symbolsForChain = (m: NetworkSwappableTokensMap, c: number): string[] => m[c].map((t: BaseToken) => t.symbol)
+        const symbolsForChain = (m: NetworkSwappableTokensMap, c: number): string[] => m[c].map((t: Token) => t.symbol)
 
         describe("Check result of two inputs", function(this: Mocha.Suite) {
             it("should have one map entry", () => expect(Object.keys(resA)).to.have.a.lengthOf(1));
@@ -54,5 +54,27 @@ describe("Basic tests", function(this: Mocha.Suite) {
         describe("Check result of swappableTokensAllNetworks", function(this: Mocha.Suite) {
             it(`should have ${numChains} map entries`, () => expect(Object.keys(resC)).to.have.a.lengthOf(numChains))
         })
+    })
+
+    describe("Test wrapped native tokens", function(this: Mocha.Suite) {
+        interface TestCase {
+            tok:        Token,
+            wantName:   string,
+            wantSymbol: string,
+        }
+
+        const testCases: TestCase[] = [
+            {tok: Tokens.WAVAX,   wantName: "Wrapped AVAX",   wantSymbol: "wAVAX"},
+            {tok: Tokens.WBNB,    wantName: "Wrapped BNB",    wantSymbol: "WBNB"},
+            {tok: Tokens.WMATIC,  wantName: "Wrapped MATIC",  wantSymbol: "WMATIC"},
+        ]
+
+        for (const tc of testCases) {
+            it(`wrapped token should have name ${tc.wantName} and symbol ${tc.wantSymbol}`, function(this: Context) {
+                expect(tc.tok.isWrappedToken).to.be.true;
+                expect(tc.tok.name).to.equal(tc.wantName);
+                expect(tc.tok.symbol).to.equal(tc.wantSymbol);
+            })
+        }
     })
 })

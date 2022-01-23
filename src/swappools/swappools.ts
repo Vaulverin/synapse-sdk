@@ -387,6 +387,7 @@ export namespace SwapPools {
             [SwapType.SYN]: [Tokens.SYN],
         },
         [ChainId.BSC]: {
+            [SwapType.BNB]:   [Tokens.WBNB],
             [SwapType.USD]:   [...BSC_POOL_SWAP_TOKEN.poolTokensForBridgeSwaps],
             [SwapType.SYN]:   [Tokens.SYN],
             [SwapType.HIGH]:  [Tokens.HIGH],
@@ -395,11 +396,12 @@ export namespace SwapPools {
             [SwapType.NFD]:   [Tokens.NFD],
         },
         [ChainId.POLYGON]: {
-            [SwapType.USD]: [...POLYGON_POOL_SWAP_TOKEN.poolTokensForBridgeSwaps],
-            [SwapType.SYN]: [Tokens.SYN],
-            [SwapType.NFD]: [Tokens.NFD],
-            [SwapType.DOG]: [Tokens.DOG],
-            [SwapType.OHM]: [Tokens.GOHM],
+            [SwapType.MATIC]: [Tokens.WMATIC],
+            [SwapType.USD]:   [...POLYGON_POOL_SWAP_TOKEN.poolTokensForBridgeSwaps],
+            [SwapType.SYN]:   [Tokens.SYN],
+            [SwapType.NFD]:   [Tokens.NFD],
+            [SwapType.DOG]:   [Tokens.DOG],
+            [SwapType.OHM]:   [Tokens.GOHM],
         },
         [ChainId.FANTOM]: {
             [SwapType.USD]:  [...FANTOM_POOL_SWAP_TOKEN.poolTokensForBridgeSwaps],
@@ -460,6 +462,8 @@ export namespace SwapPools {
     const
         FRAX_SPOOF    = "frax",
         SYNFRAX_SPOOF = "synfrax",
+        WBNB_SPOOF    = "wbnb",
+        WMATIC_SPOOF  = "wmatic",
         MOVR_SPOOF    = "movr",
         WMOVR_SPOOF   = "wmovr",
         AVAX_SPOOF    = "avax",
@@ -475,12 +479,14 @@ export namespace SwapPools {
         [SwapType.OHM]:    {[SwapType.OHM]:   { poolTokens: [Tokens.GOHM]     }},
         [SwapType.GMX]:    {[SwapType.GMX]:   { poolTokens: [Tokens.GMX]      }},
         [SwapType.SOLAR]:  {[SwapType.SOLAR]: { poolTokens: [Tokens.SOLAR]    }},
-        FRAX_SPOOF:        {[SwapType.FRAX]:  { poolTokens: [Tokens.FRAX]     }},
-        SYNFRAX_SPOOF:     {[SwapType.FRAX]:  { poolTokens: [Tokens.SYN_FRAX] }},
-        MOVR_SPOOF:        {[SwapType.MOVR]:  { poolTokens: [Tokens.MOVR]     }},
-        WMOVR_SPOOF:       {[SwapType.MOVR]:  { poolTokens: [Tokens.WMOVR]    }},
-        AVAX_SPOOF:        {[SwapType.AVAX]:  { poolTokens: [Tokens.AVAX]     }},
-        WAVAX_SPOOF:       {[SwapType.AVAX]:  { poolTokens: [Tokens.WAVAX]    }},
+        [FRAX_SPOOF]:      {[SwapType.FRAX]:  { poolTokens: [Tokens.FRAX]     }},
+        [SYNFRAX_SPOOF]:   {[SwapType.FRAX]:  { poolTokens: [Tokens.SYN_FRAX] }},
+        [WBNB_SPOOF]:      {[SwapType.BNB]:   { poolTokens: [Tokens.WBNB]     }},
+        [WMATIC_SPOOF]:    {[SwapType.MATIC]: { poolTokens: [Tokens.WMATIC]   }},
+        [MOVR_SPOOF]:      {[SwapType.MOVR]:  { poolTokens: [Tokens.MOVR]     }},
+        [WMOVR_SPOOF]:     {[SwapType.MOVR]:  { poolTokens: [Tokens.WMOVR]    }},
+        [AVAX_SPOOF]:      {[SwapType.AVAX]:  { poolTokens: [Tokens.AVAX]     }},
+        [WAVAX_SPOOF]:     {[SwapType.AVAX]:  { poolTokens: [Tokens.WAVAX]    }},
     }
 
 
@@ -532,6 +538,7 @@ export namespace SwapPools {
         [ChainId.BSC]: makeSwapTypeTokenPool(
             BSC_POOL_SWAP_TOKEN,
             null,
+            WBNB_SPOOF,
             SwapType.SYN,
             SwapType.HIGH,
             SwapType.DOG,
@@ -541,6 +548,7 @@ export namespace SwapPools {
         [ChainId.POLYGON]: makeSwapTypeTokenPool(
             POLYGON_POOL_SWAP_TOKEN,
             null,
+            WMATIC_SPOOF,
             SwapType.SYN,
             SwapType.NFD,
             SwapType.DOG,

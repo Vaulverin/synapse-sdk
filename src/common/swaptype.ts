@@ -12,6 +12,8 @@ export namespace SwapType {
         OHM:   string = "OHM",
         GMX:   string = "GMX",
         SOLAR: string = "SOLAR",
-        AVAX:  string = "AVAX",
-        MOVR:  string = "MOVR";
+        BNB:   string = "BNB",
+        MATIC: string = "MATIC",
+        MOVR:  string = "MOVR",
+        AVAX:  string = "AVAX";
 }

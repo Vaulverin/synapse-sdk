@@ -262,49 +262,53 @@ export namespace Tokens {
 
     // chain native coins and wrapper tokens
 
-    export const AVAX = new BaseToken({
-        name:     "Avalanche",
-        symbol:   "AVAX",
-        decimals: 18,
-        addresses: {
-            [ChainId.AVALANCHE]: "",
-        },
-        swapType: SwapType.AVAX,
-    })
-
-    export const WAVAX = new WrappedToken({
-        name:     "Wrapped AVAX",
-        symbol:   "wAVAX",
-        decimals: 18,
-        addresses: {
+    export const [AVAX, WAVAX] = makeWrappedNativeToken({
+        name:       "Avalanche",
+        symbol:     "AVAX",
+        decimals:    18,
+        nativeChain: ChainId.AVALANCHE,
+        wrapperAddresses: {
             [ChainId.AVALANCHE]: "0xb31f66aa3c1e785363f0875a1b74e27b85fd66c7",
             [ChainId.MOONBEAM]:  "0xA1f8890E39b4d8E33efe296D698fe42Fb5e59cC3",
         },
-        swapType:        SwapType.AVAX,
-        underlyingToken: AVAX,
-    })
+        swapType: SwapType.AVAX,
+    });
 
-    export const MOVR = new BaseToken({
-        name:     "Moonriver",
-        symbol:   "MOVR",
-        decimals: 18,
-        addresses: {
-            [ChainId.MOONRIVER]: "",
-        },
-        swapType: SwapType.MOVR,
-    })
-
-    export const WMOVR  = new WrappedToken({
-        name:     "Wrapped MOVR",
-        symbol:   "wMOVR",
-        decimals: 18,
-        addresses: {
+    export const [MOVR, WMOVR] = makeWrappedNativeToken({
+        name:       "Moonriver",
+        symbol:     "MOVR",
+        decimals:    18,
+        nativeChain: ChainId.MOONRIVER,
+        wrapperAddresses: {
             [ChainId.MOONBEAM]:  "0x1d4C2a246311bB9f827F4C768e277FF5787B7D7E",
             [ChainId.MOONRIVER]: "0x98878b06940ae243284ca214f92bb71a2b032b8a",
         },
-        swapType:        SwapType.MOVR,
-        underlyingToken: MOVR,
-    })
+        swapType: SwapType.MOVR,
+    });
+
+    export const [,WBNB] = makeWrappedNativeToken({
+        name:          "BNB",
+        symbol:        "BNB",
+        wrapperSymbol: "WBNB",
+        decimals:      18,
+        nativeChain:   ChainId.BSC,
+        wrapperAddresses: {
+            [ChainId.BSC]: "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+        },
+        swapType: SwapType.BNB,
+    });
+
+    export const [,WMATIC] = makeWrappedNativeToken({
+        name:          "MATIC",
+        symbol:        "MATIC",
+        wrapperSymbol: "WMATIC",
+        decimals:      18,
+        nativeChain:   ChainId.POLYGON,
+        wrapperAddresses: {
+            [ChainId.POLYGON]: "0x9b17bAADf0f21F03e35249e0e59723F34994F806",
+        },
+        swapType: SwapType.MATIC,
+    });
 
     // non-Synapse, non-stablecoin tokens
 
@@ -445,5 +449,38 @@ export namespace Tokens {
 
     export function isMintBurnToken(token: Token): boolean {
         return mintBurnTokens.map((t) => t.symbol).includes(token.symbol)
+    }
+
+    function makeWrappedNativeToken(args: {
+        name:        string,
+        symbol:      string,
+        decimals:    number,
+        nativeChain: number,
+        swapType:    string,
+        wrapperAddresses:   {[c: number]: string},
+        wrapperName?:       string,
+        wrapperSymbol?:     string,
+    }): [BaseToken, WrappedToken] {
+        let {name, symbol, decimals, nativeChain, swapType} = args;
+
+        let underlyingToken = new BaseToken({
+            name, symbol, decimals, swapType,
+            addresses: {[nativeChain]: ""},
+        });
+
+        let {wrapperName, wrapperSymbol, wrapperAddresses} = args;
+        wrapperName   = wrapperName   ?? `Wrapped ${symbol}`;
+        wrapperSymbol = wrapperSymbol ?? `w${symbol}`;
+
+        let wrapperToken = new WrappedToken({
+            name: wrapperName,
+            symbol: wrapperSymbol,
+            decimals,
+            swapType,
+            addresses: wrapperAddresses,
+            underlyingToken,
+        });
+
+        return [underlyingToken, wrapperToken];
     }
 }
