@@ -4,7 +4,7 @@ import {expect} from "chai";
 
 import {Context} from "mocha";
 
-import {newProviderForNetwork} from "../../src/internal/rpcproviders";
+import {newProviderForNetwork} from "../../src/internal";
 
 import {SynapseContracts} from "../../src/common";
 

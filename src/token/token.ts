@@ -3,7 +3,7 @@ import {parseUnits} from "@ethersproject/units";
 
 import type {AddressMap, DecimalsMap} from "../common";
 
-import type {SwapType} from "../internal/swaptype"
+import type {SwapType} from "../internal"
 
 export interface IBaseToken {
     readonly name:      string,

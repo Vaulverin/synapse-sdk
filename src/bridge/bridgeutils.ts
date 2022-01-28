@@ -1,11 +1,12 @@
 import type {Token} from "../token";
-
+import {Tokens} from "../tokens";
 import {ChainId} from "../common";
+
 import {Slippages} from "./slippages";
+import {GenericZapBridgeContract, L2BridgeZapContract} from "../contracts";
+
 import {BigNumber} from "@ethersproject/bignumber";
 import {Zero} from "@ethersproject/constants";
-import {GenericZapBridgeContract, L2BridgeZapContract} from "../contracts/index";
-import {Tokens} from "../tokens";
 
 
 export namespace BridgeUtils {

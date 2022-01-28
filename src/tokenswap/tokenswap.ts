@@ -10,8 +10,10 @@ import {rejectPromise} from "../common/utils";
 import {SynapseEntities} from "../entities";
 import {SwapContract, SwapFactory} from "../contracts";
 
-import {SwapType} from "../internal/swaptype";
-import {newProviderForNetwork} from "../internal/rpcproviders";
+import {
+    SwapType,
+    newProviderForNetwork,
+} from "../internal";
 
 import {UnsupportedSwapErrors} from "./unsupportedSwapErrors";
 
