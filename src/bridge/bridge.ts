@@ -332,7 +332,7 @@ export namespace Bridge {
             return ERC20.allowanceOf(address, this.zapBridgeAddress, {tokenAddress, chainId: this.chainId})
         }
 
-        private async checkNeedsApprove(args: {
+        async checkNeedsApprove(args: {
             address: string,
             token: Token | string,
             amount?: BigNumberish,
