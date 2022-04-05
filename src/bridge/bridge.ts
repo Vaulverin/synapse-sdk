@@ -368,7 +368,7 @@ export namespace Bridge {
             return {canBridge: false, reasonUnable: errStr, amount: currentAllowance}
         }
 
-        private async checkNeedsApprove({
+        async checkNeedsApprove({
             address,
             token,
             amount=MAX_APPROVAL_AMOUNT.sub(1)
