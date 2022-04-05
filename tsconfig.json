@@ -17,8 +17,8 @@
       "@tokens":           ["./src/tokens"],
       "@tokenswap":        ["./src/tokenswap"]
     },
-    "target": "ESNext",
-    "module": "ESNext",
+    "target": "es2016",
+    "module": "CommonJS",
     "outDir": "dist",
     "strict": false,
     "esModuleInterop":   true,
