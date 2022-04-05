@@ -52,6 +52,12 @@ export namespace GasUtils {
             bridgeGasLimit:  BigNumber.from(700000),
             approveGasLimit: BigNumber.from(75000),
         },
+        [ChainId.DFK]: {
+            maxFeePerGas:    makeGwei("210"),
+            maxPriorityFee:  makeGwei("3"),
+            bridgeGasLimit:  BigNumber.from(700000),
+            approveGasLimit: BigNumber.from(75000),
+        },
         [ChainId.AURORA]: {
             gasPrice: makeGwei('1'),
         },
