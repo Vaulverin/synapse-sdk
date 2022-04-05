@@ -1,33 +1,28 @@
-import {BigNumber, BigNumberish} from "@ethersproject/bignumber";
+import type {ValueOf} from "@internal/types";
 
-export namespace ChainId {
-    export const ETH:       number = 1;
-    export const OPTIMISM:  number = 10;
-    export const BSC:       number = 56;
-    export const POLYGON:   number = 137;
-    export const FANTOM:    number = 250;
-    export const BOBA:      number = 288;
-    export const MOONBEAM:  number = 1284;
-    export const MOONRIVER: number = 1285;
-    export const ARBITRUM:  number = 42161;
-    export const AVALANCHE: number = 43114;
-    export const AURORA:    number = 1313161554;
-    export const HARMONY:   number = 1666600000;
+export const ChainId = {
+    "ETH":          1,
+    "OPTIMISM":     10,
+    "CRONOS":       25,
+    "BSC":          56,
+    "POLYGON":      137,
+    "FANTOM":       250,
+    "BOBA":         288,
+    "METIS":        1088,
+    "MOONBEAM":     1284,
+    "MOONRIVER":    1285,
+    "ARBITRUM":     42161,
+    "AVALANCHE":    43114,
+    "DFK":          53935,
+    "AURORA":       1313161554,
+    "HARMONY":      1666600000,
+} as const;
 
-    export const asBigNumber = (n: BigNumberish): BigNumber => {
-        return BigNumber.from(n)
-    }
+export type ChainId = ValueOf<typeof ChainId> | number
 
-    export const asNumber = (n: BigNumberish): number => {
-        return BigNumber.from(n).toNumber()
-    }
+export type ChainIdTypeMap<T> = {[k in ChainId]?: T}
 
-    export const supportedChainIds = (): number[] => [
-        ETH,       OPTIMISM,  BSC,
-        POLYGON,   FANTOM,    BOBA,
-        MOONBEAM,  MOONRIVER, ARBITRUM,
-        AVALANCHE, AURORA,    HARMONY,
-    ]
-}
-
-export const supportedChainIds = ChainId.supportedChainIds;
+export const supportedChainIds = (): number[] =>
+    Object.values(ChainId)
+        .map(k => Number.isNaN(Number(k)) ? null : Number(k))
+        .filter(c => c !== null);

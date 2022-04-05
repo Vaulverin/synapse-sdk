@@ -1,71 +1,87 @@
+import {ChainId, type ChainIdTypeMap} from "@chainid";
+import {Networks} from "@networks";
+
 import {
-    ChainId,
-    Networks
-} from "../common";
-import {SwapType} from "../internal/swaptype";
+    type Token,
+    instanceOfToken
+} from "@token";
+
+import {Tokens}    from "@tokens";
+import {TokenSwap} from "@tokenswap";
+
 import {
-    contractAddressFor,
-    executePopulatedTransaction,
     rejectPromise,
-} from "../common/utils";
+    executePopulatedTransaction
+} from "@common/utils";
 
-import {
-    Tokens,
-} from "../tokens";
+import {SynapseContracts}    from "@synapsecontracts";
 
-import type {Token} from "../token";
+import type {
+    SynapseBridgeContract,
+    L1BridgeZapContract,
+    L2BridgeZapContract,
+    GenericZapBridgeContract
+} from "@contracts";
 
-import {SwapPools} from "../swappools";
+// import {type ID, SwapType, rpcProviderForChain, tokenSwitch} from "@internal/index";
+import type {ID} from "@internal/types";
+import {SwapType} from "@internal/swaptype";
+import {rpcProviderForChain} from "@internal/rpcproviders";
+import {tokenSwitch} from "@internal/utils";
 
-import {GenericZapBridgeContract, L1BridgeZapContract, SynapseBridgeContract} from "../contracts";
+import * as SynapseEntities from "@entities";
 
-import {SynapseEntities} from "../entities";
+import {BridgeConfig}               from "./bridgeconfig";
+import {GasUtils}                   from "./gasutils";
+import {BridgeUtils}                from "./bridgeutils";
+import {ERC20, MAX_APPROVAL_AMOUNT} from "./erc20";
 
-import {newProviderForNetwork} from "../internal/rpcproviders";
+import {id as makeKappa} from "@ethersproject/hash";
+import {Zero}            from "@ethersproject/constants";
+import {formatUnits}     from "@ethersproject/units";
+import {BigNumber}       from "@ethersproject/bignumber";
 
-import {Zero} from "@ethersproject/constants";
-import {Signer} from "@ethersproject/abstract-signer";
-import {Provider} from "@ethersproject/providers";
-import {formatUnits} from "@ethersproject/units";
-import {BigNumber, BigNumberish} from "@ethersproject/bignumber";
-import {ContractTransaction, PopulatedTransaction} from "@ethersproject/contracts";
+import type {BigNumberish} from "@ethersproject/bignumber";
+import type {Signer}       from "@ethersproject/abstract-signer";
+import type {Provider}     from "@ethersproject/providers";
 
-import {UnsupportedSwapReason} from "./errors";
-
-import {
-    ERC20,
-    MAX_APPROVAL_AMOUNT
-} from "./erc20";
-
-import {BridgeUtils} from "./bridgeutils";
-import {GasUtils} from "./gasutils";
-import {BaseToken, WrappedToken} from "../token";
-
+import type {
+    ContractTransaction,
+    PopulatedTransaction,
+} from "@ethersproject/contracts";
 
 /**
  * Bridge provides a wrapper around common Synapse Bridge interactions, such as output estimation, checking supported swaps/bridges,
  * and most importantly, executing Bridge transactions.
  */
 export namespace Bridge {
-    type CanBridgeResult = [boolean, Error];
-    export type CheckCanBridgeResult = [boolean, BigNumber];
+    export type CanBridgeResult = {
+        canBridge:     boolean;
+        reasonUnable?: string;
+        amount?:       BigNumber;
+    }
 
-    export interface BridgeOutputEstimate {
-        amountToReceive: BigNumber,
-        bridgeFee:       BigNumber,
+    type NeedsTokenApproveResult = {
+        needsApproval:     boolean;
+        currentAllowance?: BigNumber;
+    }
+
+    export type BridgeOutputEstimate = {
+        amountToReceive: BigNumber;
+        bridgeFee:       BigNumber;
     }
 
     /**
-     * @param {BaseToken} tokenFrom {@link BaseToken} user will send to the bridge on the source chain
-     * @param {BaseToken} tokenTo {@link BaseToken} user will receive from the bridge on the destination chain
+     * @param {Token} tokenFrom {@link Token} user will send to the bridge on the source chain
+     * @param {Token} tokenTo {@link Token} user will receive from the bridge on the destination chain
      * @param {number} chainIdTo Chain ID of the destination chain
      * @param {BigNumber} amountFrom not necessarily used by this interface, and overriden in BridgeParamsWithAmounts.
      */
     export interface BridgeParams {
-        tokenFrom:   Token,
-        tokenTo:     Token
-        chainIdTo:   number,
-        amountFrom?: BigNumber,
+        tokenFrom:   Token;
+        tokenTo:     Token;
+        chainIdTo:   number;
+        amountFrom?: BigNumber;
     }
 
     /**
@@ -75,18 +91,35 @@ export namespace Bridge {
      * on the destination chain.
      */
     export interface BridgeTransactionParams extends BridgeParams {
-        amountFrom: BigNumber,
-        amountTo:   BigNumber,
-        addressTo?: string
+        amountFrom: BigNumber;
+        amountTo:   BigNumber;
+        addressTo?: string;
     }
 
-    interface BridgeTokenArgs {
-        fromChainTokens: Token[],
-        toChainTokens:   Token[],
-        tokenFrom:       Token,
-        tokenTo:         Token,
-        tokenIndexFrom:  number,
-        tokenIndexTo:    number,
+    type EasyArgsCheck = {
+        isEasy:   boolean;
+        castArgs: BridgeUtils.BridgeTxParams;
+        txn?:     Promise<PopulatedTransaction>;
+    }
+
+    type BridgeTokenArgs = {
+        fromChainTokens: Token[];
+        toChainTokens:   Token[];
+        tokenFrom:       Token;
+        tokenTo:         Token;
+        tokenIndexFrom:  number;
+        tokenIndexTo:    number;
+    }
+
+    interface CheckCanBridgeParams {
+        address?: string;
+        signer?:  Signer;
+        token:    Token;
+        amount:   BigNumberish;
+    }
+
+    interface CanBridgeParams extends CheckCanBridgeParams {
+        address: string;
     }
 
     /**
@@ -97,19 +130,15 @@ export namespace Bridge {
         protected chainId: number;
         protected provider: Provider;
 
-        private readonly bridgeAddress: string;
-        private readonly bridgeInstance: SynapseBridgeContract;
-        private readonly networkZapBridgeInstance: GenericZapBridgeContract;
-        private readonly isL2Zap: boolean;
-
+        private readonly bridgeAddress:    string;
         private readonly zapBridgeAddress: string;
 
-        private readonly bridgeConfigInstance = SynapseEntities.bridgeConfig();
-        private readonly zapBridgeInstance = SynapseEntities.l1BridgeZap({
-            chainId: ChainId.ETH,
-            signerOrProvider: newProviderForNetwork(ChainId.ETH),
-        });
+        private readonly bridgeInstance: SynapseBridgeContract;
+        private readonly zapBridge:      GenericZapBridgeContract;
+        private readonly l1BridgeZapEth: L1BridgeZapContract = BridgeUtils.newL1BridgeZap(ChainId.ETH);
+        private readonly bridgeConfig:   BridgeConfig = new BridgeConfig();
 
+        private readonly isL2ETHChain: boolean;
         readonly requiredConfirmations: number;
 
         constructor(args: {
@@ -120,19 +149,26 @@ export namespace Bridge {
 
             this.network = network instanceof Networks.Network ? network : Networks.fromChainId(network);
             this.chainId = this.network.chainId;
-            this.provider = provider ?? newProviderForNetwork(this.chainId);
+            this.provider = provider ?? rpcProviderForChain(this.chainId);
 
             this.requiredConfirmations = getRequiredConfirmationsForBridge(this.network);
 
-            this.isL2Zap = this.network.zapIsL2BridgeZap;
+            this.isL2ETHChain = BridgeUtils.isL2ETHChain(this.chainId);
 
-            let factoryParams = {chainId: this.chainId, signerOrProvider: this.provider};
-            this.bridgeInstance = SynapseEntities.synapseBridge(factoryParams);
-            this.bridgeAddress = contractAddressFor(this.chainId, "bridge");
+            const contractAddrs = SynapseContracts.contractsForChainId(this.chainId);
 
-            this.networkZapBridgeInstance = SynapseEntities.zapBridge({ chainId: this.chainId, signerOrProvider: this.provider })
+            this.bridgeAddress    = contractAddrs.bridgeAddress;
+            this.zapBridgeAddress = contractAddrs.bridgeZapAddress;
 
-            this.zapBridgeAddress = this.networkZapBridgeInstance.address;
+            this.bridgeInstance = SynapseEntities.SynapseBridgeContractInstance(BridgeUtils.entityParams(this.chainId));
+
+            if (this.zapBridgeAddress && this.zapBridgeAddress !== "") {
+                this.zapBridge = BridgeUtils.newBridgeZap(this.chainId);
+            }
+        }
+
+        private get l2BridgeZap(): L2BridgeZapContract {
+            return this.zapBridge as L2BridgeZapContract
         }
 
         bridgeVersion(): Promise<BigNumber> {
@@ -143,48 +179,27 @@ export namespace Bridge {
             return this.bridgeInstance.WETH_ADDRESS()
         }
 
+        kappaExists(kappa: string): Promise<boolean> {
+            return this.bridgeInstance.kappaExists(kappa)
+        }
+
         /**
          * Returns whether a swap/bridge from this Bridge's chain to another chain between two tokens
          * is supported.
-         * @param {BaseToken} args.tokenFrom {@link Token} user will send to the bridge
-         * @param {BaseToken} args.tokenTo {@link Token} user will receive from the bridge on the destination chain
+         * @param {Token} args.tokenFrom {@link Token} user will send to the bridge
+         * @param {Token} args.tokenTo {@link Token} user will receive from the bridge on the destination chain
          * @param {number} args.chainIdTo Chain ID of the destination chain
          * @return boolean value denoting whether the input params constitute a valid swap/bridge, along with a
          * string value denoting the reason for an unsupported swap, if applicable.
          */
         swapSupported(args: {
             tokenFrom: Token,
-            tokenTo: Token
+            tokenTo:   Token
             chainIdTo: number,
         }): [boolean, string] {
-            let {tokenFrom, tokenTo, chainIdTo} = args;
+            const {swapSupported, reasonNotSupported} = bridgeSwapSupported({...args, chainIdFrom: this.chainId});
 
-            if (!this.network.supportsToken(tokenFrom)) {
-                return [false, UnsupportedSwapReason.TokenNotSupported_From]
-            }
-
-            if (!Networks.networkSupportsToken(chainIdTo, tokenTo)) {
-                return [false, UnsupportedSwapReason.TokenNotSupported_To]
-            }
-
-            if (tokenFrom.swapType !== tokenTo.swapType) {
-                return [false, UnsupportedSwapReason.NonmatchingSwapTypes]
-            }
-
-            let
-                isEthFromBoba = (this.chainId === ChainId.BOBA) && (tokenFrom.swapType === SwapType.ETH),
-                isEthToBoba = (chainIdTo === ChainId.BOBA) && (tokenTo.swapType === SwapType.ETH);
-
-            if (isEthFromBoba || isEthToBoba) {
-                return [false, UnsupportedSwapReason.ETHOnBOBA]
-            }
-            // if ((this.chainId === ChainId.BOBA) && (tokenFrom.swapType === SwapType.ETH)) {
-            //     if ((chainIdTo === ChainId.ETH) && (tokenTo.isETH)) {
-            //         return [false, UnsupportedSwapReason.BOBAToL1]
-            //     }
-            // }
-
-            return [true, ""]
+            return [swapSupported, reasonNotSupported?.reason || ""]
         }
 
         /**
@@ -196,13 +211,9 @@ export namespace Bridge {
          * bridge fee, so the bridge fee is entirely for user-facing purposes. Do not use it for calculations.
          */
         async estimateBridgeTokenOutput(args: BridgeParams): Promise<BridgeOutputEstimate> {
-            try {
-                await this.checkSwapSupported(args);
-            } catch (e) {
-                return rejectPromise(e);
-            }
-
-            return this.calculateBridgeRate(args)
+            return this.checkSwapSupported(args)
+                .then(() => this.calculateBridgeRate(args))
+                .catch(rejectPromise)
         }
 
         /**
@@ -231,8 +242,9 @@ export namespace Bridge {
                 : this.buildL2BridgeTxn(args, tokenArgs);
 
             return newTxn
-                .then((txn) => GasUtils.populateGasParams(this.chainId, txn, "bridge"))
-                .catch(rejectPromise)
+                .then(txn =>
+                    GasUtils.populateGasParams(this.chainId, txn, "bridge")
+                )
         }
 
         /**
@@ -240,42 +252,42 @@ export namespace Bridge {
          * Note that this function **does** send a signed transaction.
          * @param {BridgeTransactionParams} args Parameters for the bridge transaction.
          * @param {Signer} signer Some instance which implements the Ethersjs {@link Signer} interface.
+         * @param {boolean} callStatic (Optional, default: false) if true, uses provider.callStatic instead of actually sending the signed transaction.
          * @return {Promise<ContractTransaction>}
          */
-        async executeBridgeTokenTransaction(args: BridgeTransactionParams, signer: Signer): Promise<ContractTransaction> {
+        async executeBridgeTokenTransaction(
+            args:       BridgeTransactionParams,
+            signer:     Signer,
+            callStatic: boolean=false
+        ): Promise<ContractTransaction> {
             try {
                 await this.checkSwapSupported(args);
-            } catch (e) {
+            } catch (e) { /* c8 ignore start */
                 return rejectPromise(e);
-            }
+            } /* c8 ignore stop */
 
-            const
-                {tokenFrom, amountFrom, addressTo} = args,
-                signerAddress = await signer.getAddress();
+            const {tokenFrom, amountFrom, addressTo} = args;
 
-            args.addressTo = addressTo ?? signerAddress
+            const signerAddress = await signer.getAddress()
 
-            if (this.network.chainCurrency === args.tokenFrom.symbol) {
-                const balance = await signer.getBalance();
-                if (balance.lt(args.amountFrom))
-                    return rejectPromise(`Not enough funds for native currency ${args.tokenFrom.symbol}`);
-            } else {
-                await this.checkCanBridge({
-                    address: signerAddress,
-                    token: tokenFrom,
-                    amount: amountFrom,
+            if (!addressTo) { /* c8 ignore start */
+                args.addressTo = signerAddress;
+            } /* c8 ignore stop */
+
+            const checkArgs = {signer, token: tokenFrom, amount: amountFrom};
+
+            return this.checkCanBridge(checkArgs)
+                .then(canBridgeRes => {
+                    const {canBridge, reasonUnable} = canBridgeRes;
+
+                    if (!canBridge) {
+                        return rejectPromise(reasonUnable)
+                    }
+
+                    return this.buildBridgeTokenTransaction(args)
+                        .then(txn => executePopulatedTransaction(txn, signer))
                 })
-                  .then((canBridgeRes: CanBridgeResult) => {
-                      const [canBridge, err] = canBridgeRes;
-
-                      if (!canBridge) {
-                          return rejectPromise(err)
-                      }
-                  })
-                  .catch(rejectPromise);
-            }
-            let txnProm = this.buildBridgeTokenTransaction(args);
-            return executePopulatedTransaction(txnProm, signer);
+                .catch(rejectPromise)
         }
 
         /**
@@ -285,7 +297,7 @@ export namespace Bridge {
          * framework so they can ultimately send the transaction.
          * Should ALWAYS be called before performing any bridge transactions to ensure they don't fail.
          * @param {Object} args
-         * @param {BaseToken|string} args.token {@link BaseToken} instance or valid on-chain address of the token the user will be sending
+         * @param {Token|string} args.token {@link Token} instance or valid on-chain address of the token the user will be sending
          * to the bridge on the source chain.
          * @param {BigNumberish} args.amount Optional, a specific amount of args.token to approve. By default, this function
          * builds an Approve call using an "infinite" approval amount.
@@ -293,7 +305,7 @@ export namespace Bridge {
          * of web3/ethers/etc.
          */
         async buildApproveTransaction(args: {
-            token: Token | string,
+            token:   Token | string,
             amount?: BigNumberish
         }): Promise<PopulatedTransaction> {
             const [approveArgs, tokenAddress] = this.buildERC20ApproveArgs(args);
@@ -308,22 +320,21 @@ export namespace Bridge {
          * framework so they can ultimately send the transaction.
          * Should ALWAYS be called before performing any bridge transactions to ensure they don't fail.
          * @param {Object} args
-         * @param {BaseToken|string} args.token {@link BaseToken} instance or valid on-chain address of the token the user will be sending
+         * @param {Token|string} args.token {@link Token} instance or valid on-chain address of the token the user will be sending
          * to the bridge on the source chain.
          * @param {BigNumberish} args.amount Optional, a specific amount of args.token to approve. By default, this function
          * @param {Signer} signer Valid ethers Signer instance for building a fully and properly populated
          * transaction.
          */
-        async executeApproveTransaction(args: {
-            token: Token | string,
-            amount?: BigNumberish
-        }, signer: Signer): Promise<ContractTransaction> {
-            const [approveArgs, tokenAddress] = this.buildERC20ApproveArgs(args);
+        async executeApproveTransaction(
+            args:       {token: Token | string, amount?: BigNumberish},
+            signer:     Signer,
+        ): Promise<ContractTransaction> {
+            const
+                [approveArgs, tokenAddress] = this.buildERC20ApproveArgs(args),
+                tokenParams = {tokenAddress, chainId: this.chainId};
 
-            return Promise.resolve(
-                ERC20.approve(approveArgs, {tokenAddress, chainId: this.chainId}, signer)
-                    .then((res: ContractTransaction) => res)
-            )
+            return ERC20.approve(approveArgs, tokenParams, signer)
         }
 
         async getAllowanceForAddress(args: {
@@ -336,115 +347,139 @@ export namespace Bridge {
             return ERC20.allowanceOf(address, this.zapBridgeAddress, {tokenAddress, chainId: this.chainId})
         }
 
-        async checkNeedsApprove(args: {
-            address: string,
-            token: Token | string,
-            amount?: BigNumberish,
-        }): Promise<CheckCanBridgeResult> {
-            let {amount} = args;
-            amount = amount ?? MAX_APPROVAL_AMOUNT.sub(1);
+        private async resolveApproveFunc(
+            approveRes:    NeedsTokenApproveResult,
+            hasBalanceRes: Promise<CanBridgeResult>,
+            token:         Token
+        ): Promise<CanBridgeResult> {
+            const {needsApproval, currentAllowance} = approveRes;
 
-            const {address} = args;
-            const [{spender}, tokenAddress] = this.buildERC20ApproveArgs(args);
+            let allowanceEth: string;
+            if (currentAllowance) {
+                allowanceEth = formatUnits(currentAllowance, token.decimals(this.chainId)).toString();
+            }
+
+            const errStr: string = `Spend allowance of Bridge too low for token ${token.symbol}; current allowance for Bridge is ${allowanceEth}`;
+
+            if (!needsApproval) {
+                return hasBalanceRes
+            }
+
+            return {canBridge: false, reasonUnable: errStr, amount: currentAllowance}
+        }
+
+        private async checkNeedsApprove({
+            address,
+            token,
+            amount=MAX_APPROVAL_AMOUNT.sub(1)
+        }: CheckCanBridgeParams): Promise<NeedsTokenApproveResult> {
+            const [{spender}, tokenAddress] = this.buildERC20ApproveArgs({token, amount});
 
             return ERC20.allowanceOf(address, spender, {tokenAddress, chainId: this.chainId})
-                .then((allowance: BigNumber) => {
-                    const res: CheckCanBridgeResult = [allowance.lt(amount), allowance];
-                    return res
+                .then(currentAllowance => ({needsApproval: currentAllowance.lt(amount), currentAllowance}))
+        }
+
+        private async resolveBalanceFunc(
+            prom:   Promise<BigNumber>,
+            amount: BigNumberish,
+            token:  Token
+        ): Promise<CanBridgeResult> {
+            return Promise.resolve(prom)
+                .then(balance => {
+                    const
+                        hasBalance         = balance.gte(amount),
+                        balanceEth: string = formatUnits(balance, token.decimals(this.chainId)).toString();
+
+                    return (
+                        hasBalance
+                            ? {canBridge: true}
+                            : {canBridge: false, reasonUnable: `Balance of token ${token.symbol} is too low; current balance is ${balanceEth}`, amount: balance}
+                    ) as CanBridgeResult
                 })
                 .catch(rejectPromise)
         }
 
-        private async checkHasBalance(args: {
-            address: string,
-            token: Token | string,
-            amount: BigNumberish,
-        }): Promise<CheckCanBridgeResult> {
+        private async checkGasTokenBalance(args: CanBridgeParams): Promise<CanBridgeResult> {
+            const {address, token, amount} = args;
+
+            const balanceProm: Promise<BigNumber> = this.provider.getBalance(address);
+
+            return this.resolveBalanceFunc(
+                balanceProm,
+                amount,
+                token
+            )
+        }
+
+        async checkCanBridge(args: CheckCanBridgeParams): Promise<CanBridgeResult> {
+            const {token, signer, address} = args;
+
+            let signerAddress: string;
+
+
+            if (address && address !== "") { /* c8 ignore start */
+                signerAddress = address;
+            } else {
+                signerAddress = await signer.getAddress();
+            } /* c8 ignore stop */
+
+            const checkArgs: CanBridgeParams = {...args, address: signerAddress};
+
+            const isGasTokenTransfer: boolean =
+                (this.network.chainCurrency === token.symbol) && BridgeUtils.chainSupportsGasToken(this.chainId);
+
+            let hasBalanceRes: Promise<CanBridgeResult> = isGasTokenTransfer
+                ? this.checkGasTokenBalance(checkArgs)
+                : this.checkERC20Balance(checkArgs);
+
+            return isGasTokenTransfer
+                ? hasBalanceRes
+                : this.checkNeedsApprove(checkArgs)
+                    .then(approveRes => this.resolveApproveFunc(approveRes, hasBalanceRes, token))
+                    .catch(rejectPromise)
+        }
+
+        private async checkERC20Balance(args: CanBridgeParams): Promise<CanBridgeResult> {
             const
-                {address, amount} = args,
-                [, tokenAddress] = this.buildERC20ApproveArgs(args);
+                {address, amount, token} = args,
+                tokenAddress: string = token.address(this.chainId);
 
-            return ERC20.balanceOf(address, {tokenAddress, chainId: this.chainId})
-                .then((balance: BigNumber) => {
-                    const res: CheckCanBridgeResult = [balance.gte(amount), balance];
-                    return res
-                })
-                .catch(rejectPromise)
-        }
-
-        private async checkCanBridge(args: {
-            address: string,
-            token: Token,
-            amount: BigNumberish,
-        }): Promise<CanBridgeResult> {
-            const {token} = args;
-
-            const hasBalanceRes = this.checkHasBalance(args)
-                .then((balanceRes) => {
-                    const [hasBalance, balance] = balanceRes;
-                    if (!hasBalance) {
-                        let balanceEth: string = formatUnits(balance, token.decimals(this.chainId)).toString();
-                        let ret: CanBridgeResult = [false, new Error(`Balance of token ${token.symbol} is too low; current balance is ${balanceEth}`)];
-                        return ret
-                    }
-
-                    let ret: CanBridgeResult = [true, null];
-                    return ret
-                })
-                .catch(rejectPromise)
-
-            return this.checkNeedsApprove(args)
-                .then((approveRes) => {
-                    const [needsApprove, allowance] = approveRes;
-                    if (needsApprove) {
-                        let allowanceEth: string = formatUnits(allowance, token.decimals(this.chainId)).toString();
-                        let ret: CanBridgeResult = [false, new Error(`Spend allowance of Bridge too low for token ${token.symbol}; current allowance for Bridge is ${allowanceEth}`)];
-                        return ret
-                    }
-
-                    return hasBalanceRes
-                })
-                .catch(rejectPromise)
+            return this.resolveBalanceFunc(
+                ERC20.balanceOf(address, {tokenAddress, chainId: this.chainId}),
+                amount,
+                token
+            )
         }
 
         private buildERC20ApproveArgs(args: {
-            token: Token | string,
+            token:   Token | string,
             amount?: BigNumberish
         }): [ERC20.ApproveArgs, string] {
             const {token, amount} = args;
+            let spender: string = this.zapBridgeAddress;
 
-            let tokenAddr: string = (token instanceof BaseToken) || (token instanceof WrappedToken)
+            if (instanceOfToken(token) && token.isEqual(Tokens.MULTIJEWEL)) {
+                spender = SynapseEntities.AvaxJewelMigrationAddress;
+            }
+
+            /* c8 ignore start */
+            let tokenAddr: string = instanceOfToken(token)
                 ? token.address(this.chainId)
                 : token as string;
+            /* c8 ignore stop */
 
             return [{
-                spender: this.zapBridgeAddress,
+                spender,
                 amount
             }, tokenAddr]
         }
 
         private async checkSwapSupported(args: BridgeParams): Promise<boolean> {
-            const
-                {chainIdTo, tokenFrom, tokenTo} = args,
-                networkTo = Networks.fromChainId(chainIdTo);
-
             return new Promise<boolean>((resolve, reject) => {
-                let [swapSupported, errReason] = this.swapSupported({tokenFrom, chainIdTo, tokenTo});
+                let [swapSupported, errReason] = this.swapSupported(args);
                 if (!swapSupported) {
-                    switch (errReason) {
-                        case UnsupportedSwapReason.TokenNotSupported_From:
-                            reject(`Network '${this.network.name}' does not support token ${tokenFrom.name} (param: tokenFrom)`);
-                            break;
-                        case UnsupportedSwapReason.TokenNotSupported_To:
-                            reject(`Network '${networkTo.name}' (param: chainIdTo) does not support token ${tokenTo.name} (param: tokenTo)`);
-                            break;
-                        case UnsupportedSwapReason.NonmatchingSwapTypes:
-                            reject(`param tokenFrom with swapType '${tokenFrom.swapType}' cannot be bridge to param tokenTo with swapType '${tokenTo.swapType}'`);
-                            break;
-                        default:
-                            reject(errReason);
-                            break;
-                    }
+                    reject(errReason);
+                    return
                 }
 
                 resolve(true);
@@ -454,8 +489,7 @@ export namespace Bridge {
         private async calculateBridgeRate(args: BridgeParams): Promise<BridgeOutputEstimate> {
             let {chainIdTo, amountFrom} = args;
 
-            const toChainZapParams = {chainId: chainIdTo, signerOrProvider: newProviderForNetwork(chainIdTo)};
-            const toChainZap: GenericZapBridgeContract = SynapseEntities.zapBridge(toChainZapParams);
+            const l2BridgeZapTo = BridgeUtils.newL2BridgeZap(chainIdTo);
 
             const {
                 tokenFrom, tokenTo,
@@ -463,180 +497,159 @@ export namespace Bridge {
                 fromChainTokens
             } = this.makeBridgeTokenArgs(args);
 
-            const mintBurnSwapTypes = [
-                SwapType.HIGH, SwapType.DOG, SwapType.JUMP,
-                SwapType.NFD,  SwapType.OHM, SwapType.SOLAR,
-                SwapType.GMX,
-            ];
 
-            let [intermediateToken, bridgeConfigIntermediateToken] = ((): [Token, Token] => {
-                if (mintBurnSwapTypes.includes(tokenFrom.swapType)) {
-                    return [tokenFrom, tokenFrom]
-                }
+            let {intermediateToken} = TokenSwap.intermediateTokens(chainIdTo, tokenFrom);
 
-                switch (tokenFrom.swapType) {
-                    case SwapType.SYN:
-                        return [Tokens.SYN, Tokens.SYN]
-                    case SwapType.FRAX:
-                        if (chainIdTo === ChainId.ETH) {
-                            return [null, Tokens.FRAX]
-                        } else {
-                            return [null, Tokens.SYN_FRAX]
-                        }
-                    case SwapType.ETH:
-                        let intermediate: Token;
-                        if (chainIdTo === ChainId.ETH) {
-                            intermediate = Tokens.WETH;
-                        } else {
-                            intermediate = Tokens.NETH;
-                        }
-
-                        return [Tokens.NETH, intermediate]
-                    case SwapType.AVAX:
-                        return [Tokens.WAVAX, Tokens.WAVAX]
-                    case SwapType.MOVR:
-                        return [Tokens.WMOVR, Tokens.WMOVR]
-                    default:
-                        return [Tokens.NUSD, Tokens.NUSD]
-                }
-            })();
-
-            const bigNumTen = BigNumber.from(10);
-
-            bridgeConfigIntermediateToken = bridgeConfigIntermediateToken ?? intermediateToken;
-            const bridgeFeeRequest = this.bridgeConfigInstance.calculateSwapFee(
-                bridgeConfigIntermediateToken.address(chainIdTo),
+            const {
+                bridgeFee:  bridgeFeeRequest,
+                amountFrom: amountFromFixedDecimals
+            } = this.bridgeConfig.calculateSwapFee({
+                chainIdFrom: this.chainId,
+                tokenFrom,
                 chainIdTo,
-                amountFrom.mul(bigNumTen.pow(18-tokenFrom.decimals(this.chainId)))
-            );
+                amountFrom
+            });
 
-            const checkEthy = (c: number, t: Token): boolean => BridgeUtils.isL2ETHChain(c) && t.swapType === SwapType.ETH
+            const checkEthBridge = (c1: number, c2: number, t: Token): boolean =>
+                c1 === ChainId.ETH && BridgeUtils.isL2ETHChain(c2) && t.swapType === SwapType.ETH
 
             const
-                ethToEth:   boolean = this.chainId === ChainId.ETH && checkEthy(chainIdTo,    tokenTo),
-                ethFromEth: boolean = chainIdTo    === ChainId.ETH && checkEthy(this.chainId, tokenFrom);
+                ethToEth:   boolean = checkEthBridge(this.chainId, chainIdTo,    tokenTo),
+                ethFromEth: boolean = checkEthBridge(chainIdTo,    this.chainId, tokenFrom);
 
-            let amountToReceive_from: BigNumber;
-            switch (true) {
-                case amountFrom.eq(Zero):
-                    amountToReceive_from = Zero;
-                    break;
-                case ethToEth:
-                case Tokens.isMintBurnToken(tokenFrom):
-                case tokenFrom.isWrappedToken:
-                    amountToReceive_from = amountFrom;
-                    break;
-                case this.chainId === ChainId.ETH:
-                    let liquidityAmounts = fromChainTokens.map((t) => tokenFrom.isEqual(t) ? amountFrom : Zero);
-                    amountToReceive_from = await this.zapBridgeInstance.calculateTokenAmount(liquidityAmounts, true);
+            let amountToReceive_from_prom: Promise<BigNumber>;
 
-                    break;
-                default:
-                    amountToReceive_from = await BridgeUtils.calculateSwapL2Zap(
-                        this.networkZapBridgeInstance,
-                        intermediateToken.address(this.chainId),
-                        tokenIndexFrom,
-                        0,
-                        amountFrom
-                    );
+            if (amountFrom.isZero()) {
+                amountToReceive_from_prom = Promise.resolve(Zero);
+            } else if (ethToEth || Tokens.isMintBurnToken(tokenFrom) || tokenFrom.isWrapperToken) {
+                amountToReceive_from_prom = Promise.resolve(amountFromFixedDecimals);
+            } else if (this.chainId === ChainId.ETH) {
+                let liquidityAmounts = fromChainTokens.map((t) =>
+                    tokenFrom.isEqual(t) ? amountFrom : Zero
+                );
+
+                amountToReceive_from_prom = this.l1BridgeZapEth.calculateTokenAmount(
+                    liquidityAmounts,
+                    true
+                );
+            } else {
+                amountToReceive_from_prom = this.l2BridgeZap.calculateSwap(
+                    intermediateToken.address(this.chainId),
+                    tokenIndexFrom,
+                    0,
+                    amountFrom
+                );
             }
+
+            let amountToReceive_from = await amountToReceive_from_prom;
 
             let bridgeFee: BigNumber;
-            try {
+
+            try { /* c8 ignore start */
                 bridgeFee = await bridgeFeeRequest;
+                if (bridgeFee === null) {
+                    console.error("calculateSwapFee returned null");
+                    return rejectPromise("calculateSwapFee returned null")
+                }
             } catch (e) {
                 console.error(`Error in bridge fee request: ${e}`);
-                return null
-            }
+                return rejectPromise(e)
+            } /* c8 ignore stop */
 
             amountToReceive_from = BridgeUtils.subBigNumSafe(amountToReceive_from, bridgeFee);
 
-            let amountToReceive_to: BigNumber;
-            switch (true) {
-                case amountToReceive_from.isZero():
-                    amountToReceive_to = Zero;
-                    break;
-                case ethFromEth:
-                case Tokens.isMintBurnToken(tokenTo):
-                case tokenTo.isWrappedToken:
-                    amountToReceive_to = amountToReceive_from;
-                    break;
-                case chainIdTo === ChainId.ETH:
-                    amountToReceive_to = await (toChainZap as L1BridgeZapContract)
-                        .calculateRemoveLiquidityOneToken(amountToReceive_from, tokenIndexTo);
+            let amountToReceive_to_prom: Promise<BigNumber>;
 
-                    break;
-                default:
-                    amountToReceive_to = await BridgeUtils.calculateSwapL2Zap(
-                        toChainZap,
-                        intermediateToken.address(chainIdTo),
-                        0,
-                        tokenIndexTo,
-                        amountToReceive_from
+            if (amountToReceive_from.isZero()) {
+                amountToReceive_to_prom = Promise.resolve(Zero);
+            } else if (ethFromEth || Tokens.isMintBurnToken(tokenTo) || tokenTo.isWrapperToken) {
+                amountToReceive_to_prom = Promise.resolve(amountToReceive_from);
+            } else if (chainIdTo === ChainId.ETH) {
+                amountToReceive_to_prom =
+                    this.l1BridgeZapEth.calculateRemoveLiquidityOneToken(
+                        amountToReceive_from,
+                        tokenIndexTo
                     );
+            } else {
+                amountToReceive_to_prom = l2BridgeZapTo.calculateSwap(
+                    intermediateToken.address(chainIdTo),
+                    0,
+                    tokenIndexTo,
+                    amountToReceive_from
+                );
             }
 
-            let amountToReceive = amountToReceive_to;
+            let amountToReceive: BigNumber;
+            try { /* c8 ignore start */
+                amountToReceive = await Promise.resolve(amountToReceive_to_prom)
+            } catch (err) {
+                return rejectPromise(err)
+            } /* c8 ignore stop */
 
             return {amountToReceive, bridgeFee}
         }
 
         private checkEasyArgs(
-            args: BridgeTransactionParams,
+            args:      BridgeTransactionParams,
             zapBridge: GenericZapBridgeContract,
-            easyDeposits:    symbol[],
-            easyRedeems:     symbol[],
-            easyDepositETH?: symbol[],
+            easyDeposits:    ID[],
+            easyRedeems:     ID[],
+            easyDepositETH?: ID[],
         ): EasyArgsCheck {
-            let castArgs = args as BridgeUtils.BridgeTxParams;
+            let
+                castArgs = args as BridgeUtils.BridgeTxParams,
+                isEasy: boolean = false,
+                txn:    Promise<PopulatedTransaction>;
 
-            if (easyRedeems.includes(args.tokenTo.hash)) {
-                return {
-                    castArgs,
-                    isEasy: true,
-                    txn: zapBridge.populateTransaction.redeem(...BridgeUtils.makeEasyParams(castArgs, this.chainId, args.tokenTo))
-                }
-            } else if (easyDeposits.includes(args.tokenTo.hash)) {
-                return {
-                    castArgs,
-                    isEasy: true,
-                    txn: zapBridge.populateTransaction.deposit(...BridgeUtils.makeEasyParams(castArgs, this.chainId, args.tokenTo))
-                }
-            } else if (easyDepositETH.includes(args.tokenTo.hash)) {
-                return {
-                    castArgs,
-                    isEasy: true,
-                    txn: zapBridge.populateTransaction.depositETH(...BridgeUtils.depositETHParams(castArgs), {value: args.amountFrom})
-                }
+            const params = BridgeUtils.makeEasyParams(castArgs, this.chainId, args.tokenTo);
+
+            switch (true) {
+                case easyRedeems.includes(args.tokenTo.id):
+                    isEasy = true;
+                    txn    = zapBridge.populateTransaction.redeem(...params);
+                    break;
+                case easyDeposits.includes(args.tokenTo.id):
+                    isEasy = true;
+                    txn    = zapBridge.populateTransaction.deposit(...params);
+                    break;
+                case easyDepositETH.includes(args.tokenTo.id):
+                    isEasy = true;
+                    txn    =  zapBridge
+                        .populateTransaction
+                        .depositETH(
+                            ...BridgeUtils.depositETHParams(castArgs),
+                            BridgeUtils.overrides(args.amountFrom)
+                        );
+                    break;
             }
 
-            return {castArgs, isEasy: false}
+            return {castArgs, isEasy, txn}
         }
 
         private buildETHMainnetBridgeTxn(
-            args: BridgeTransactionParams,
+            args:      BridgeTransactionParams,
             tokenArgs: BridgeTokenArgs
         ): Promise<PopulatedTransaction> {
-            const
-                {addressTo, chainIdTo, amountFrom, amountTo} = args,
-                zapBridge = SynapseEntities.l1BridgeZap({
-                    chainId: this.chainId,
-                    signerOrProvider: this.provider
-                });
+            const {addressTo, chainIdTo, amountFrom, amountTo} = args;
 
             let
-                easyRedeems:    symbol[] = [Tokens.SYN.hash],
-                easyDeposits:   symbol[] = [Tokens.HIGH.hash, Tokens.DOG.hash, Tokens.FRAX.hash],
-                easyDepositETH: symbol[] = [Tokens.NETH.hash]
+                easyRedeems:    ID[] = [Tokens.SYN.id,  Tokens.UST.id],
+                easyDeposits:   ID[] = [
+                    Tokens.HIGH.id, Tokens.DOG.id,  Tokens.FRAX.id,
+                    Tokens.GOHM.id, Tokens.NEWO.id, Tokens.SDT.id,
+                ],
+                easyDepositETH: ID[] = [Tokens.NETH.id];
 
-            if (args.tokenFrom.isEqual(Tokens.NUSD)) {
-                easyDeposits.push(Tokens.NUSD.hash);
-            }
-
-            let {castArgs, isEasy, txn} = this.checkEasyArgs(args, zapBridge, easyDeposits, easyRedeems, easyDepositETH);
+            let {castArgs, isEasy, txn} = this.checkEasyArgs(args, this.l1BridgeZapEth, easyDeposits, easyRedeems, easyDepositETH);
             if (isEasy && txn) {
                 return txn
             }
+
+            const liquidityAmounts = tokenArgs.fromChainTokens.map(t =>
+                    args.tokenFrom.isEqual(t)
+                        ? amountFrom
+                        : Zero
+            );
 
             const {
                 transactionDeadline,
@@ -647,52 +660,63 @@ export namespace Bridge {
                 minToSwapDestFromOriginMediumSlippage,
             } = BridgeUtils.getSlippages(amountFrom, amountTo);
 
-            switch (args.tokenTo.hash) {
-                case Tokens.NUSD.hash:
-                    if (!args.tokenFrom.isEqual(Tokens.NUSD)) {
-                        const liquidityAmounts = tokenArgs.fromChainTokens.map((t) => {
-                            return args.tokenFrom.isEqual(t) ? amountFrom : Zero
-                        });
+            if (args.tokenTo.isEqual(Tokens.NUSD) || args.tokenTo.isEqual(Tokens.DFK_USDC)) {
+                if (args.tokenFrom.isEqual(Tokens.NUSD) || args.tokenFrom.isEqual(Tokens.DFK_USDC)) {
+                    const bridgeDepositArgs = BridgeUtils.makeEasyParams(
+                        args as BridgeUtils.BridgeTxParams,
+                        this.chainId,
+                        Tokens.NUSD
+                    );
 
-                        return zapBridge.populateTransaction.zapAndDeposit(
-                            addressTo,
-                            chainIdTo,
-                            Tokens.NUSD.address(this.chainId),
-                            liquidityAmounts,
-                            minToSwapDest,
-                            transactionDeadline,
-                        )
-                    }
-                    break;
-                default:
-                    if (BridgeUtils.isETHLikeToken(args.tokenTo) || args.tokenTo.isEqual(Tokens.WETH)) {
-                        return zapBridge.populateTransaction.depositETHAndSwap(
-                            ...BridgeUtils.depositETHParams(castArgs),
-                            0, // nusd tokenindex,
-                            tokenArgs.tokenIndexTo,
-                            minToSwapDestFromOrigin, // minDy
-                            bridgeTransactionDeadline,
-                            {value: amountFrom}
-                        )
-                    }
-
-                    const liquidityAmounts = tokenArgs.fromChainTokens.map((t) => {
-                        return args.tokenFrom.isEqual(t) ? amountFrom : Zero
-                    });
-
-                    return zapBridge.populateTransaction.zapAndDepositAndSwap(
+                    return this.l1BridgeZapEth
+                        .populateTransaction
+                        .deposit(...bridgeDepositArgs)
+                } else {
+                    return this.l1BridgeZapEth.populateTransaction.zapAndDeposit(
                         addressTo,
                         chainIdTo,
                         Tokens.NUSD.address(this.chainId),
                         liquidityAmounts,
-                        minToSwapOriginMediumSlippage, // minToSwapOrigin,
+                        minToSwapDest,
                         transactionDeadline,
-                        0,
-                        tokenArgs.tokenIndexTo,
-                        minToSwapDestFromOriginMediumSlippage, //, minToSwapDestFromOrigin, // minDy
-                        bridgeTransactionDeadline,
                     )
+                }
             }
+
+            if (BridgeUtils.isETHLikeToken(args.tokenTo) || args.tokenTo.isEqual(Tokens.WETH)) {
+                return this.l1BridgeZapEth.populateTransaction.depositETHAndSwap(
+                    ...BridgeUtils.depositETHParams(castArgs),
+                    0, // nusd tokenindex,
+                    tokenArgs.tokenIndexTo,
+                    minToSwapDestFromOrigin, // minDy
+                    bridgeTransactionDeadline,
+                    BridgeUtils.overrides(amountFrom)
+                )
+            } else if (args.tokenFrom.isEqual(Tokens.NUSD)) {
+                return this.l1BridgeZapEth.populateTransaction.depositAndSwap(
+                    addressTo,
+                    chainIdTo,
+                    Tokens.NUSD.address(this.chainId),
+                    amountFrom,
+                    0,
+                    tokenArgs.tokenIndexTo,
+                    minToSwapDestFromOriginMediumSlippage,
+                    bridgeTransactionDeadline
+                )
+            }
+
+            return this.l1BridgeZapEth.populateTransaction.zapAndDepositAndSwap(
+                addressTo,
+                chainIdTo,
+                Tokens.NUSD.address(this.chainId),
+                liquidityAmounts,
+                minToSwapOriginMediumSlippage, // minToSwapOrigin,
+                transactionDeadline,
+                0,
+                tokenArgs.tokenIndexTo,
+                minToSwapDestFromOriginMediumSlippage, //, minToSwapDestFromOrigin, // minDy
+                bridgeTransactionDeadline,
+            )
         }
 
         private buildL2BridgeTxn(
@@ -701,45 +725,65 @@ export namespace Bridge {
         ): Promise<PopulatedTransaction> {
             const
                 {chainIdTo, amountFrom, amountTo} = args,
-                zapBridge = SynapseEntities.l2BridgeZap({
-                    chainId: this.chainId,
+                zapBridge = SynapseEntities.L2BridgeZapContractInstance({
+                    chainId:          this.chainId,
                     signerOrProvider: this.provider
                 });
 
-            if (tokenArgs.tokenFrom.isEqual(Tokens.AVWETH)) {
-                tokenArgs.tokenFrom = Tokens.WETH_E;
+            tokenArgs.tokenFrom = tokenArgs.tokenFrom.isEqual(Tokens.AVWETH)
+                ? Tokens.WETH_E
+                : tokenArgs.tokenFrom;
+
+            if (tokenArgs.tokenFrom.isEqual(Tokens.MULTIJEWEL)) {
+                const jewelMigrator = SynapseEntities.AvaxJewelMigrationContractInstance();
+
+                return jewelMigrator
+                    .populateTransaction
+                    .migrateAndBridge(
+                        args.amountFrom,
+                        args.addressTo,
+                        args.chainIdTo
+                    )
             }
 
             let
-                easyDeposits:   symbol[] = [],
-                easyRedeems:    symbol[] = [Tokens.SYN.hash, Tokens.HIGH.hash, Tokens.DOG.hash, Tokens.FRAX.hash],
-                easyDepositETH: symbol[] = []
+                easyDeposits:   ID[] = [],
+                easyDepositETH: ID[] = [],
+                easyRedeems:    ID[] = [
+                    Tokens.SYN.id,      Tokens.HIGH.id,    Tokens.DOG.id,
+                    Tokens.FRAX.id,     Tokens.UST.id,     Tokens.GOHM.id,
+                    Tokens.NEWO.id,     Tokens.SDT.id,     Tokens.LUNA.id,
+                ];
 
-            if (args.tokenFrom.isEqual(Tokens.NUSD)) {
-                easyRedeems.push(Tokens.NUSD.hash);
-            }
+            BridgeUtils.DepositIfChainTokens.forEach((depositIfChainArgs) => {
+                if (this.chainId === ChainId.DFK && args.tokenTo.isEqual(Tokens.SYN_AVAX)) {
+                    return
+                }
 
-            BridgeUtils.DepositIfChainTokens.forEach((args) => {
-                let {chainId, tokens, depositEth, altChainId} = args;
+                let {chainId, tokens, depositEth, redeemChainIds} = depositIfChainArgs;
 
                 let
-                    hasAltChain = typeof altChainId !== 'undefined',
-                    tokenHashes = tokens.map((t) => t.hash);
+                    hasAltChains = redeemChainIds.length > 0,
+                    tokenHashes  = tokens.map((t) => t.id);
 
                 if (this.chainId === chainId) {
-                    depositEth
-                        ? easyDepositETH.push(...tokenHashes)
-                        : easyDeposits.push(...tokenHashes);
-                } else {
-                    if (hasAltChain) {
-                        if (this.chainId === altChainId) easyRedeems.push(...tokenHashes);
+                    if (depositEth) {
+                        easyDepositETH.push(...tokenHashes);
                     } else {
+                        easyDeposits.push(...tokenHashes);
+                    }
+                } else {
+                    if (hasAltChains && redeemChainIds.includes(this.chainId)) {
                         easyRedeems.push(...tokenHashes);
                     }
                 }
-            })
+            });
 
-            let {castArgs, isEasy, txn} = this.checkEasyArgs(args, zapBridge, easyDeposits, easyRedeems, easyDepositETH);
+            const
+                dfkBridgeZap = BridgeUtils.newL1BridgeZap(ChainId.DFK),
+                checkEasyZap = this.chainId === ChainId.DFK ? dfkBridgeZap : this.zapBridge;
+
+            let {castArgs, isEasy, txn} = this.checkEasyArgs(args, checkEasyZap, easyDeposits, easyRedeems, easyDepositETH);
             if (isEasy && txn) {
                 return txn
             }
@@ -748,21 +792,44 @@ export namespace Bridge {
                 transactionDeadline,
                 bridgeTransactionDeadline,
                 minToSwapOriginHighSlippage,
+                minToSwapDestFromOriginMediumSlippage,
                 minToSwapDestFromOriginHighSlippage,
                 minToSwapDest,
             } = BridgeUtils.getSlippages(amountFrom, amountTo);
 
-            const easyRedeemAndSwap = (baseToken: BaseToken): Promise<PopulatedTransaction> =>
-                zapBridge.populateTransaction.redeemAndSwap(
-                    ...BridgeUtils.makeEasyParams(castArgs, this.chainId, baseToken),
-                    0,
-                    tokenArgs.tokenIndexTo,
-                    minToSwapDest,
-                    transactionDeadline,
-                )
+            const easyRedeemAndSwap = (baseToken: Token): Promise<PopulatedTransaction> =>
+                zapBridge
+                    .populateTransaction
+                    .redeemAndSwap(
+                        ...BridgeUtils.makeEasyParams(castArgs, this.chainId, baseToken),
+                        0,
+                        tokenArgs.tokenIndexTo,
+                        minToSwapDest,
+                        transactionDeadline,
+                    )
 
-            const easySwapAndRedeemAndSwap = (baseToken: BaseToken, withValueOverride: boolean): Promise<PopulatedTransaction> =>
-                zapBridge.populateTransaction.swapAndRedeemAndSwap(
+            const easySwapAndRedeem = (baseToken: Token, swapETH: boolean = false): Promise<PopulatedTransaction> => {
+                let populateFn = swapETH
+                    ? zapBridge.populateTransaction.swapETHAndRedeem
+                    : zapBridge.populateTransaction.swapAndRedeem
+
+                return populateFn(
+                    ...BridgeUtils.makeEasySubParams(castArgs, this.chainId, baseToken),
+                    tokenArgs.tokenIndexFrom,
+                    0,
+                    amountFrom,
+                    minToSwapOriginHighSlippage, // minToSwapOrigin, // minToSwapOriginHighSlippage,
+                    transactionDeadline,
+                    swapETH ? BridgeUtils.overrides(amountFrom) : {}
+                )
+            }
+
+            const easySwapAndRedeemAndSwap = (baseToken: Token, swapETH: boolean = false): Promise<PopulatedTransaction> => {
+                let populateFn = swapETH
+                    ? zapBridge.populateTransaction.swapETHAndRedeemAndSwap
+                    : zapBridge.populateTransaction.swapAndRedeemAndSwap
+
+                return populateFn(
                     ...BridgeUtils.makeEasySubParams(castArgs, this.chainId, baseToken),
                     tokenArgs.tokenIndexFrom,
                     0,
@@ -773,70 +840,164 @@ export namespace Bridge {
                     tokenArgs.tokenIndexTo,
                     minToSwapDestFromOriginHighSlippage, // swapMinAmount
                     bridgeTransactionDeadline, // toSwapDeadline, // swapDeadline
-                    BridgeUtils.makeOverrides(amountFrom, withValueOverride),
+                    swapETH ? BridgeUtils.overrides(amountFrom) : {}
                 )
+            }
 
-            switch (args.tokenTo.hash) {
-                case Tokens.NUSD.hash:
-                    return zapBridge.populateTransaction.swapAndRedeem(
-                        ...BridgeUtils.makeEasySubParams(castArgs, this.chainId, Tokens.NUSD),
-                        tokenArgs.tokenIndexFrom,
-                        0,
-                        amountFrom,
-                        minToSwapOriginHighSlippage,
-                        transactionDeadline
-                    )
-                case Tokens.GMX.hash:
+            switch (tokenSwitch(args.tokenTo)) {
+                case Tokens.NUSD:
+                case Tokens.DFK_USDC:
+                    if (args.tokenFrom.isEqual(Tokens.NUSD) || args.tokenFrom.isEqual(Tokens.DFK_USDC)) {
+                        return zapBridge
+                            .populateTransaction
+                            .redeem(...BridgeUtils.makeEasyParams(castArgs, this.chainId, Tokens.NUSD))
+                    }
+
+                    return zapBridge
+                        .populateTransaction
+                        .swapAndRedeem(
+                            ...BridgeUtils.makeEasySubParams(castArgs, this.chainId, Tokens.NUSD),
+                            tokenArgs.tokenIndexFrom,
+                            0,
+                            amountFrom,
+                            minToSwapOriginHighSlippage,
+                            transactionDeadline
+                        )
+                case Tokens.GMX:
                     let params = BridgeUtils.makeEasyParams(castArgs, this.chainId, Tokens.GMX);
-                    switch (this.chainId) {
-                        case ChainId.ARBITRUM:
-                            return zapBridge.populateTransaction.deposit(...params)
-                        default:
-                            let [addrTo, chainTo,,amount] = params;
-                            return this.bridgeInstance.populateTransaction.redeem(
+                    let [addrTo, chainTo,,amount] = params;
+
+                    return this.chainId === ChainId.ARBITRUM
+                        ? zapBridge.populateTransaction.deposit(...params)
+                        : this.bridgeInstance
+                            .populateTransaction
+                            .redeem(
                                 addrTo,
                                 chainTo,
                                 Tokens.GMX.wrapperAddress(this.chainId),
                                 amount
                             )
+                case Tokens.JEWEL:
+                    if (this.chainId === ChainId.HARMONY) {
+                        return zapBridge
+                            .populateTransaction
+                            .swapAndRedeem(
+                                ...BridgeUtils.makeEasySubParams(castArgs, this.chainId, Tokens.SYN_JEWEL),
+                                0,
+                                1,
+                                amountFrom,
+                                minToSwapOriginHighSlippage, // minToSwapOrigin, // minToSwapOriginHighSlippage,
+                                transactionDeadline
+                            )
+                    } else if (this.chainId === ChainId.DFK) {
+                        if (args.chainIdTo === ChainId.HARMONY) {
+                            return dfkBridgeZap.populateTransaction.depositETHAndSwap(
+                                args.addressTo,
+                                args.chainIdTo,
+                                args.amountFrom,
+                                1,
+                                0,
+                                minToSwapDestFromOriginMediumSlippage,
+                                bridgeTransactionDeadline,
+                                BridgeUtils.overrides(args.amountFrom)
+                            )
+                        }
+
+                        return dfkBridgeZap.populateTransaction.depositETH(
+                            args.addressTo,
+                            args.chainIdTo,
+                            args.amountFrom,
+                            BridgeUtils.overrides(args.amountFrom)
+                        )
                     }
+
+                    if (chainIdTo === ChainId.DFK) {
+                        return zapBridge.populateTransaction.redeem(
+                            args.addressTo,
+                            ChainId.DFK,
+                            Tokens.JEWEL.address(this.chainId),
+                            args.amountFrom
+                        )
+                    }
+
+                    return zapBridge.populateTransaction.redeemAndSwap(
+                        args.addressTo,
+                        args.chainIdTo,
+                        Tokens.JEWEL.address(this.chainId),
+                        args.amountFrom,
+                        1,
+                        0,
+                        minToSwapDest,
+                        transactionDeadline
+                    )
+                case Tokens.SYN_JEWEL:
+                    if (this.chainId === ChainId.DFK) {
+                        return dfkBridgeZap
+                            .populateTransaction
+                            .depositETH(
+                                args.addressTo,
+                                args.chainIdTo,
+                                args.amountFrom,
+                                BridgeUtils.overrides(args.amountFrom)
+                            )
+                    }
+
+                    return zapBridge
+                        .populateTransaction
+                        .swapAndRedeem(
+                            ...BridgeUtils.makeEasySubParams(castArgs, this.chainId, Tokens.JEWEL),
+                            0,
+                            1,
+                            amountFrom,
+                            minToSwapOriginHighSlippage, // minToSwapOrigin, // minToSwapOriginHighSlippage,
+                            transactionDeadline
+                        )
+                case Tokens.SYN_AVAX:
+                    if (this.chainId === ChainId.DFK) {
+                        return dfkBridgeZap
+                            .populateTransaction
+                            .redeem(...BridgeUtils.makeEasyParams(castArgs, this.chainId, Tokens.WAVAX))
+                    }
+
+                    /* c8 ignore next */
+                    break;
+
+                    // @NOTE: the following is commented out as the branch is
+                    //
+                    // return zapBridge
+                    //     .populateTransaction
+                    //     .depositETH(
+                    //         castArgs.addressTo,
+                    //         castArgs.chainIdTo,
+                    //         castArgs.amountFrom,
+                    //         BridgeUtils.overrides(castArgs.amountFrom)
+                    //     )
                 default:
                     if (chainIdTo === ChainId.ETH) {
-                        if ((BridgeUtils.isL2ETHChain(this.chainId)) && (args.tokenFrom.swapType === SwapType.ETH)) {
+                        if (this.isL2ETHChain && args.tokenFrom.swapType === SwapType.ETH) {
                             if (args.tokenFrom.isEqual(Tokens.NETH)) {
-                                return zapBridge.populateTransaction.redeem(
-                                    ...BridgeUtils.makeEasyParams(castArgs, this.chainId, Tokens.NETH)
-                                )
-                            } else if (BridgeUtils.isETHLikeToken(args.tokenFrom)) {
-                                return zapBridge.populateTransaction.swapAndRedeem(
-                                    ...BridgeUtils.makeEasySubParams(castArgs, this.chainId, Tokens.NETH),
-                                    tokenArgs.tokenIndexFrom,
-                                    0,
-                                    amountFrom,
-                                    minToSwapOriginHighSlippage, // minToSwapOrigin, // minToSwapOriginHighSlippage,
-                                    transactionDeadline,
-                                )
+                                return zapBridge
+                                    .populateTransaction
+                                    .redeem(...BridgeUtils.makeEasyParams(castArgs, this.chainId, Tokens.NETH))
                             } else {
-                                return zapBridge.populateTransaction.swapETHAndRedeem(
-                                    ...BridgeUtils.makeEasySubParams(castArgs, this.chainId, Tokens.NETH),
-                                    tokenArgs.tokenIndexFrom,
-                                    0,
-                                    amountFrom,
-                                    minToSwapOriginHighSlippage, // minToSwapOrigin, // minToSwapOriginHighSlippage,
-                                    transactionDeadline,
-                                    {value: amountFrom}
-                                );
+                                let useSwapETH = !BridgeUtils.isETHLikeToken(args.tokenFrom);
+                                return easySwapAndRedeem(Tokens.NETH, useSwapETH)
                             }
-                        } else if (args.tokenFrom.isEqual(Tokens.NUSD)) {
-                          return zapBridge.populateTransaction.redeemAndRemove(
-                              ...BridgeUtils.makeEasySubParams(castArgs, this.chainId, Tokens.NUSD),
-                              amountFrom,
-                              tokenArgs.tokenIndexTo,
-                              minToSwapDest,
-                              transactionDeadline,
-                          )
-                        } else {
-                            return zapBridge.populateTransaction.swapAndRedeemAndRemove(
+                        } else if (args.tokenFrom.isEqual(Tokens.NUSD) || args.tokenFrom.isEqual(Tokens.DFK_USDC)) {
+                            return zapBridge
+                                .populateTransaction
+                                .redeemAndRemove(
+                                    ...BridgeUtils.makeEasySubParams(castArgs, this.chainId, Tokens.NUSD),
+                                    amountFrom,
+                                    tokenArgs.tokenIndexTo,
+                                    minToSwapDest,
+                                    transactionDeadline
+                                )
+                        }
+
+                        return zapBridge
+                            .populateTransaction
+                            .swapAndRedeemAndRemove(
                                 ...BridgeUtils.makeEasySubParams(castArgs, this.chainId, Tokens.NUSD),
                                 tokenArgs.tokenIndexFrom,
                                 0,
@@ -847,88 +1008,56 @@ export namespace Bridge {
                                 minToSwapDestFromOriginHighSlippage, // swapMinAmount
                                 bridgeTransactionDeadline, // toSwapDeadline, // swapDeadline
                             )
-                        }
-                    } else {
-                        if (args.tokenFrom.isEqual(Tokens.NUSD)) {
-                            return easyRedeemAndSwap(Tokens.NUSD)
-                        } else if (args.tokenFrom.isEqual(Tokens.NETH)) {
-                            return easyRedeemAndSwap(Tokens.NETH)
-                        } else if (args.tokenFrom.swapType === SwapType.ETH) {
-                            if (BridgeUtils.isETHLikeToken(args.tokenFrom)) {
-                                return easySwapAndRedeemAndSwap(Tokens.NETH, false)
-                            } else {
-                                return zapBridge.populateTransaction.swapETHAndRedeemAndSwap(
-                                    ...BridgeUtils.makeEasySubParams(castArgs, this.chainId, Tokens.NETH),
-                                    tokenArgs.tokenIndexFrom,
-                                    0,
-                                    amountFrom,
-                                    minToSwapOriginHighSlippage,
-                                    transactionDeadline,
-                                    0,
-                                    tokenArgs.tokenIndexTo,
-                                    minToSwapDestFromOriginHighSlippage,
-                                    bridgeTransactionDeadline,
-                                    {value: amountFrom}
-                                )
-                            }
-                        } else {
-                            return easySwapAndRedeemAndSwap(Tokens.NUSD, false)
-                        }
                     }
+
+                    if (this.chainId === ChainId.HARMONY && args.tokenFrom.isEqual(Tokens.SYN_AVAX)) {
+                        const redeemArgs = BridgeUtils.makeEasyParams(castArgs, this.chainId, Tokens.SYN_AVAX);
+
+                        return zapBridge
+                            .populateTransaction
+                            .redeem(...redeemArgs)
+                    }
+
+                    if (args.tokenFrom.isEqual(Tokens.NUSD) || args.tokenFrom.isEqual(Tokens.DFK_USDC) || args.tokenFrom.isEqual(Tokens.NETH)) {
+                        return easyRedeemAndSwap(args.tokenFrom)
+                    }
+
+                    if (args.tokenFrom.swapType === SwapType.ETH) {
+                        let useSwapETH = !BridgeUtils.isETHLikeToken(args.tokenFrom);
+                        return easySwapAndRedeemAndSwap(Tokens.NETH, useSwapETH)
+                    }
+
+                    return easySwapAndRedeemAndSwap(Tokens.NUSD)
             }
         }
 
         private makeBridgeTokenArgs(args: BridgeParams): BridgeTokenArgs {
             let {tokenFrom, tokenTo, chainIdTo} = args;
 
-            const
-                swapparoo = (t: Token, check: Token, swappy: Token): Token => t.isEqual(check) ? swappy : t,
-                swappadoo = (check: Token, swappy: Token): ((t1: Token, t2: Token) => [Token, Token]) =>
-                    (t1: Token, t2: Token) => [swapparoo(t1, check, swappy), swapparoo(t2, check, swappy)];
-
-            let kangaroo: (t1: Token, t2: Token) => [Token, Token];
+            let bridgeTokens: (t1: Token, t2: Token) => [Token, Token];
 
             switch (tokenFrom.swapType) {
                 case SwapType.ETH:
-                    kangaroo = swappadoo(Tokens.ETH, Tokens.WETH);
+                    bridgeTokens = BridgeUtils.checkReplaceTokens(Tokens.ETH, Tokens.WETH);
                     break;
                 case SwapType.AVAX:
-                    kangaroo = swappadoo(Tokens.AVAX, Tokens.WAVAX);
+                    bridgeTokens = BridgeUtils.checkReplaceTokens(Tokens.AVAX, Tokens.WAVAX);
                     break;
                 case SwapType.MOVR:
-                    kangaroo = swappadoo(Tokens.MOVR, Tokens.WMOVR);
+                    bridgeTokens = BridgeUtils.checkReplaceTokens(Tokens.MOVR, Tokens.WMOVR);
+                    break;
+                case SwapType.JEWEL:
+                    bridgeTokens = BridgeUtils.checkReplaceTokens(Tokens.GAS_JEWEL, Tokens.JEWEL);
                     break;
                 default:
-                    kangaroo = (t1: Token, t2: Token) => [t1, t2];
+                    bridgeTokens = (t1: Token, t2: Token) => [t1, t2];
             }
 
-            [tokenFrom, tokenTo] = kangaroo(tokenFrom, tokenTo);
-
-            const findSymbol = (tokA: Token, tokB: Token): boolean => {
-                let compareTok: Token = tokB;
-
-                if (tokB.isEqual(Tokens.WETH_E)) {
-                    compareTok = Tokens.AVWETH;
-                } else if (tokB.isEqual(Tokens.ETH)) {
-                    compareTok = Tokens.WETH;
-                } else if (tokB.isWrappedToken) {
-                    compareTok = tokB.underlyingToken;
-                }
-
-                return tokA.isEqual(compareTok);
-            }
-
-            const makeTokenArgs = (chainId: number, t: Token): [Token[], number] => {
-                let
-                    toks = SwapPools.bridgeSwappableTypePoolsByChain[chainId]?.[t.swapType]?.poolTokens,
-                    idx  = toks.findIndex((tok: Token) => findSymbol(tok, t));
-
-                return [toks, idx]
-            }
+            [tokenFrom, tokenTo] = bridgeTokens(tokenFrom, tokenTo);
 
             const
-                [fromChainTokens, tokenIndexFrom] = makeTokenArgs(this.chainId, tokenFrom),
-                [toChainTokens,   tokenIndexTo]   = makeTokenArgs(chainIdTo,    tokenTo);
+                [fromChainTokens, tokenIndexFrom] = BridgeUtils.makeTokenArgs(this.chainId, tokenFrom),
+                [toChainTokens,   tokenIndexTo]   = BridgeUtils.makeTokenArgs(chainIdTo,    tokenTo);
 
             return {
                 fromChainTokens,
@@ -941,29 +1070,51 @@ export namespace Bridge {
         }
     }
 
-    const REQUIRED_CONFS = {
+    const REQUIRED_CONFS: ChainIdTypeMap<number> = {
         [ChainId.ETH]:       7,
         [ChainId.OPTIMISM]:  1,
+        [ChainId.CRONOS]:    6,
         [ChainId.BSC]:       14,
         [ChainId.POLYGON]:   128,
         [ChainId.FANTOM]:    5,
         [ChainId.BOBA]:      1,
+        [ChainId.METIS]:     6,
         [ChainId.MOONBEAM]:  21,
         [ChainId.MOONRIVER]: 21,
         [ChainId.ARBITRUM]:  40,
         [ChainId.AVALANCHE]: 5,
+        [ChainId.DFK]:       1,
         [ChainId.HARMONY]:   1,
+        [ChainId.AURORA]:    5,
     };
 
-    export function getRequiredConfirmationsForBridge(network: Networks.Network | number): number {
+    export function getRequiredConfirmationsForBridge(network: Networks.Network | number): number | null {
         let chainId: number = network instanceof Networks.Network ? network.chainId : network;
 
-        return REQUIRED_CONFS[chainId] ?? -1
+        if (chainId in REQUIRED_CONFS) {
+            return REQUIRED_CONFS[chainId]
+        }
+
+        return null
     }
 
-    interface EasyArgsCheck {
-        isEasy: boolean,
-        castArgs: BridgeUtils.BridgeTxParams,
-        txn?: Promise<PopulatedTransaction>,
+    export function bridgeSwapSupported(args: TokenSwap.BridgeSwapSupportedParams): TokenSwap.SwapSupportedResult {
+        return TokenSwap.bridgeSwapSupported(args)
+    }
+
+    export interface BridgeTransactionCompleteParams {
+        chainIdTo:                number;
+        transactionHashChainFrom: string;
+    }
+
+    export function checkBridgeTransactionComplete(args: BridgeTransactionCompleteParams): Promise<boolean> {
+        const
+            {chainIdTo, transactionHashChainFrom} = args,
+            kappa = makeKappa(transactionHashChainFrom),
+            bridgeInstance = new SynapseBridge({network: chainIdTo});
+
+        return bridgeInstance.kappaExists(kappa)
+            .then(res => res)
+            .catch(rejectPromise)
     }
 }

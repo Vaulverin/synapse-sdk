@@ -1,50 +1,47 @@
 export {
-    newSynapseBridgeInstance,
-    newL1BridgeZapInstance,
-    newL2BridgeZapInstance
-} from "./entities";
+    SynapseBridgeContractInstance,
+    L1BridgeZapContractInstance,
+    L2BridgeZapContractInstance
+} from "@entities";
 
-import {SynapseEntities} from "./entities";
-
-export const {
-    synapseBridge,
-    l1BridgeZap,
-    l2BridgeZap,
-} = SynapseEntities;
-
-import {Bridge, Slippages, UnsupportedSwapReason} from "./bridge";
-
-export type BridgeOutputEstimate = Bridge.BridgeOutputEstimate;
-
-export {Bridge, Slippages, UnsupportedSwapReason}
+export {Bridge}    from "@bridge/bridge";
+export {Slippages} from "@bridge/slippages";
 
 export {
     ChainId,
+    supportedChainIds
+} from "@common/chainid";
+
+export {
     Networks,
-    supportedChainIds,
-    supportedNetworks,
-    utils
-} from "./common";
+    supportedNetworks
+} from "@common/networks";
 
-export type {ChainIdTypeMap, AddressMap, DecimalsMap} from "./common";
+export {
+    type Token,
+    BaseToken,
+    WrapperToken
+} from "@token";
 
-export {BaseToken, WrappedToken} from "./token";
-export type {Token} from "./token";
-
-export {Tokens} from "./tokens";
+export {Tokens} from "@tokens";
 
 export {
     SwapPools,
     networkSwapTokensMap,
     allNetworksSwapTokensMap,
-    detailedTokenSwapMap,
-    swappableTokens,
-    swappableTokensAllNetworks,
-} from "./swappools";
-export type {
-    DetailedTokenSwapMap,
-    NetworkSwappableTokensMap
-} from "./swappools";
+    type NetworkSwappableTokensMap
+} from "@swappools";
+
+import {TokenSwap, UnsupportedSwapErrors} from "@tokenswap";
+
+import detailedTokenSwapMap = TokenSwap.detailedTokenSwapMap;
+
+export {TokenSwap, UnsupportedSwapErrors, detailedTokenSwapMap};
+
+export {
+    type RPCEndpointsConfig,
+    configureRPCEndpoints
+} from "@internal/rpcproviders";
 
 export type {
     SynapseBridgeContract,
@@ -52,5 +49,5 @@ export type {
     L1BridgeZapContract,
     L2BridgeZapContract,
     SynapseERC20Contract,
-    BridgeConfigContract
-} from "./contracts";
+    BridgeConfigV3Contract
+} from "@contracts";

@@ -1,4 +1,4 @@
-import {BigNumber} from "@ethersproject/bignumber";
+import {BigNumber}   from "@ethersproject/bignumber";
 import {formatUnits} from "@ethersproject/units";
 
 export namespace Slippages {
@@ -13,10 +13,8 @@ export namespace Slippages {
     export function _applySlippage(
         inputValue:       BigNumber,
         slippageSelected: string|Slippage,
-        add?:             boolean
+        add:              boolean = false
     ): BigNumber {
-        add = add ?? false;
-
         let numerator: number, denominator: number;
         switch (slippageSelected) {
             case Slippages.OneTenth:

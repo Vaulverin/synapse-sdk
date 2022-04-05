@@ -1,15 +1,27 @@
 import {Signer} from "@ethersproject/abstract-signer";
-import {Provider} from "@ethersproject/providers";
-import {BigNumber, BigNumberish} from "@ethersproject/bignumber";
-import {PopulatedTransaction, ContractTransaction} from "@ethersproject/contracts";
+import type {TransactionResponse} from "@ethersproject/abstract-provider";
+import {
+    BigNumber,
+    type BigNumberish,
+} from "@ethersproject/bignumber";
+import type {
+    PopulatedTransaction,
+    ContractTransaction,
+} from "@ethersproject/contracts";
 
-import {ERC20Factory, ERC20Contract} from "../contracts";
-import {newProviderForNetwork} from "../internal/rpcproviders";
+import {
+    ERC20Factory,
+    ERC20Contract,
+} from "@contracts";
+
+import {rpcProviderForChain} from "@internal/rpcproviders";
 
 import {
     executePopulatedTransaction,
-    rejectPromise,
-} from "../common/utils";
+    rejectPromise
+} from "@common/utils";
+
+import type {SignerOrProvider} from "@common/types";
 
 import {GasUtils} from "./gasutils";
 
@@ -17,85 +29,111 @@ export const MAX_APPROVAL_AMOUNT = BigNumber.from("0xfffffffffffffffffffffffffff
 
 
 export namespace ERC20 {
-    export interface ApproveArgs {
-        spender: string,
-        amount?: BigNumberish
+    export type ApproveArgs = {
+        spender: string;
+        amount?: BigNumberish;
     }
 
-    export interface ERC20TokenParams {
-        tokenAddress: string,
-        chainId:      number,
+    export type ERC20TokenParams = {
+        tokenAddress: string;
+        chainId:      number;
     }
 
     class ERC20 {
         readonly address: string;
         readonly chainId: number;
-        private readonly provider: Provider;
         private readonly instance: ERC20Contract;
 
         constructor(args: ERC20TokenParams) {
             this.address = args.tokenAddress;
             this.chainId = args.chainId;
 
-            this.provider = newProviderForNetwork(this.chainId);
-            this.instance = ERC20Factory.connect(this.address, this.provider);
+            this.instance = ERC20Factory.connect(this.address, null);
         }
 
-        approve = async (
-            args:    ApproveArgs,
-            signer:  Signer,
-            dryRun?: boolean
-        ): Promise<boolean|ContractTransaction> => {
-            dryRun = dryRun ?? false;
+        private connectContract(provider?: SignerOrProvider): ERC20Contract {
+            provider = provider ? provider : rpcProviderForChain(this.chainId);
 
-            return dryRun
-                ? this.instance.callStatic.approve(
-                    args.spender,
-                    args.amount ?? MAX_APPROVAL_AMOUNT,
-                    {from: signer.getAddress()}
-                )
-                : executePopulatedTransaction(this.buildApproveTransaction(args), signer)
+            return this.instance.connect(provider);
         }
 
-        buildApproveTransaction = async (args: ApproveArgs): Promise<PopulatedTransaction> => {
-            let {spender, amount} = args;
-            amount = amount ?? MAX_APPROVAL_AMOUNT;
+        async approve(args: ApproveArgs, signer: Signer,
+        ): Promise<ContractTransaction> {
+            const
+                contract   = this.connectContract(signer),
+                approveTxn = this._buildApproveTransaction(args, contract);
 
-            return this.instance.populateTransaction.approve(spender, amount)
-                .then((txn) => GasUtils.populateGasParams(this.chainId, txn, "approve"))
+            return executePopulatedTransaction(approveTxn, signer)
+        }
+
+        async buildApproveTransaction(
+            args:      ApproveArgs,
+            provider?: SignerOrProvider
+        ): Promise<PopulatedTransaction> {
+            const contract = this.connectContract(provider);
+            return this._buildApproveTransaction(args, contract)
+        }
+
+        private async _buildApproveTransaction(
+            args:     ApproveArgs,
+            contract: ERC20Contract
+        ): Promise<PopulatedTransaction> {
+            const {spender, amount=MAX_APPROVAL_AMOUNT} = args;
+
+            return contract
+                .populateTransaction
+                .approve(spender, amount)
+                .then(txn => {
+                    return GasUtils.populateGasParams(
+                        this.chainId,
+                        txn,
+                        "approve"
+                    )
+                })
                 .catch(rejectPromise)
         }
 
-        balanceOf = async (
+        async balanceOf(
             address: string
-        ): Promise<BigNumber> => this.instance.balanceOf(address)
+        ): Promise<BigNumber> {
+            return this.connectContract().balanceOf(address)
+        }
 
-        allowanceOf = async (
+        async allowanceOf(
             owner: string,
             spender: string
-        ): Promise<BigNumber> => this.instance.allowance(owner, spender)
+        ): Promise<BigNumber> {
+            return this.connectContract().allowance(owner, spender)
+        }
     }
 
-    export const approve = async (
+    export async function approve(
         approveArgs: ApproveArgs,
         tokenParams: ERC20TokenParams,
-        signer:      Signer,
-        dryRun?:     boolean,
-    ): Promise<boolean|ContractTransaction> => new ERC20(tokenParams).approve(approveArgs, signer, dryRun)
+        signer:      Signer
+    ): Promise<TransactionResponse> {
+        return new ERC20(tokenParams).approve(approveArgs, signer)
+    }
 
-    export const buildApproveTransaction = async (
+    export async function buildApproveTransaction(
         approveArgs: ApproveArgs,
         tokenParams: ERC20TokenParams
-    ): Promise<PopulatedTransaction> => new ERC20(tokenParams).buildApproveTransaction(approveArgs)
+    ): Promise<PopulatedTransaction> {
+        return new ERC20(tokenParams).buildApproveTransaction(approveArgs)
+    }
 
-    export const balanceOf = async (
+    export async function balanceOf(
         address:     string,
         tokenParams: ERC20TokenParams
-    ): Promise<BigNumber> => new ERC20(tokenParams).balanceOf(address)
+    ): Promise<BigNumber> {
+        return new ERC20(tokenParams).balanceOf(address)
+    }
 
-    export const allowanceOf = async (
+    export async function allowanceOf(
         owner:       string,
         spender:     string,
         tokenParams: ERC20TokenParams
-    ): Promise<BigNumber> => new ERC20(tokenParams).allowanceOf(owner, spender)
+    ): Promise<BigNumber> {
+        return new ERC20(tokenParams).allowanceOf(owner, spender)
+    }
 }

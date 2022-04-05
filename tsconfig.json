@@ -1,34 +1,44 @@
 {
   "compilerOptions": {
-    "target": "es2016",
-    "module": "CommonJS",
+    "baseUrl": "./",
+    "paths": {
+      "@bridge":           ["./src/bridge"],
+      "@bridge/*":         ["./src/bridge/*"],
+      "@common/*":         ["./src/common/*"],
+      "@chainid":          ["./src/common/chainid"],
+      "@networks":         ["./src/common/networks"],
+      "@utils":            ["./src/common/utils"],
+      "@synapsecontracts": ["./src/common/synapse_contracts"],
+      "@entities":         ["./src/entities"],
+      "@contracts":        ["./src/contracts"],
+      "@internal/*":       ["./src/internal/*"],
+      "@swappools":        ["./src/swappools"],
+      "@token":            ["./src/token"],
+      "@tokens":           ["./src/tokens"],
+      "@tokenswap":        ["./src/tokenswap"]
+    },
+    "target": "ESNext",
+    "module": "ESNext",
     "outDir": "dist",
     "strict": false,
     "esModuleInterop":   true,
     "resolveJsonModule": true,
     "moduleResolution": "node",
-    "baseUrl": "src",
-    "allowJs": true,
-    "checkJs": true,
     "declaration": true,
-    "removeComments": true,
+    "removeComments": false,
     "types": [
       "node",
-      "mocha"
     ],
     "isolatedModules": true,
-    "skipLibCheck": true
-  },
-  "ts-node": {
-    "files": true,
+    "skipLibCheck": true,
   },
   "include": [
-    "src"
+    "src/**/*"
   ],
   "exclude": [
     "node_modules",
-    "test",
     "dist",
-    "**/*-test.ts"
+    "test",
+    "examples"
   ]
 }

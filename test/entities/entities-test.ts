@@ -1,83 +1,91 @@
-import "../helpers/chaisetup";
-
-import {expect} from "chai";
-
-import {Context} from "mocha";
-
-import {newProviderForNetwork} from "../../src/internal/rpcproviders";
-
-import {SynapseContracts} from "../../src/common";
-
-import {ChainId} from "../../src";
+import {
+    wrapExpect,
+    expectNull
+} from "@tests/helpers";
 
 import {
-    newSynapseBridgeInstance,
-    newL1BridgeZapInstance,
-    newL2BridgeZapInstance,
-    synapseBridge,
-    l1BridgeZap,
-    l2BridgeZap,
-} from "../../src";
+    ChainId,
+    Networks
+} from "@sdk";
+
+import {
+    SynapseBridgeContractInstance,
+    L1BridgeZapContractInstance,
+    L2BridgeZapContractInstance,
+    GenericZapBridgeContractInstance,
+    BridgeConfigV3ContractInstance
+} from "@sdk/entities";
+
+import {rpcProviderForChain}   from "@sdk/internal/rpcproviders";
+import type {SignerOrProvider} from "@sdk/common/types";
+
+import type {BaseContract} from "@ethersproject/contracts";
 
 
 describe("Entities tests", function(this: Mocha.Suite) {
-    it("Make SynapseBridge instance", function(this: Context) {
-        const provider = newProviderForNetwork(ChainId.FANTOM);
-        let instance = newSynapseBridgeInstance({
-            address: SynapseContracts.Fantom.bridge.address,
-            signerOrProvider: provider,
+    enum EntityKind {
+        SynapseBridge    = "SynapseBridge",
+        L1BridgeZap      = "L1BridgeZap",
+        L2BridgeZap      = "L2BridgeZap",
+        GenericZapBridge = "GenericZapBridge",
+        BridgeConfigV3   = "BridgeConfigV3",
+    }
+
+    interface fnArgs {
+        chainId:          number;
+        signerOrProvider: SignerOrProvider;
+    }
+
+    interface TestCase {
+        chainId: number;
+        fn:      (args: fnArgs) => BaseContract;
+        kind:    EntityKind;
+    }
+
+    function makeTestCase(chainId: number, kind: EntityKind): TestCase {
+        let fn: (args: fnArgs) => BaseContract;
+
+        switch (kind) {
+            case EntityKind.SynapseBridge:
+                fn = SynapseBridgeContractInstance;
+                break;
+            case EntityKind.L1BridgeZap:
+                fn = L1BridgeZapContractInstance;
+                break;
+            case EntityKind.L2BridgeZap:
+                fn = L2BridgeZapContractInstance;
+                break;
+            case EntityKind.GenericZapBridge:
+                fn = GenericZapBridgeContractInstance;
+                break;
+            case EntityKind.BridgeConfigV3:
+                fn = BridgeConfigV3ContractInstance;
+                break;
+        }
+
+        return {chainId, fn, kind}
+    }
+
+    [
+        makeTestCase(ChainId.FANTOM, EntityKind.SynapseBridge),
+        makeTestCase(ChainId.FANTOM, EntityKind.L2BridgeZap),
+        makeTestCase(ChainId.BSC,    EntityKind.SynapseBridge),
+        makeTestCase(ChainId.BSC,    EntityKind.L2BridgeZap),
+        makeTestCase(ChainId.ETH,    EntityKind.SynapseBridge),
+        makeTestCase(ChainId.ETH,    EntityKind.L1BridgeZap),
+        makeTestCase(ChainId.ETH,    EntityKind.BridgeConfigV3),
+    ].forEach(tc => {
+        describe(Networks.networkName(tc.chainId), function(this: Mocha.Suite) {
+            const
+                provider                = rpcProviderForChain(tc.chainId),
+                newInstanceArgs: fnArgs = {chainId: tc.chainId, signerOrProvider: provider};
+
+            let instance: BaseContract = tc.fn(newInstanceArgs);
+
+            it(
+                `Test ${EntityKind[tc.kind]} instance`,
+                wrapExpect(expectNull(instance, false))
+            );
         });
-
-        expect(instance).to.not.be.null;
-    })
-
-    it("Make SynapseBridge entity instance", function(this: Context) {
-        const provider = newProviderForNetwork(ChainId.FANTOM);
-        let instance = synapseBridge({
-            chainId:          ChainId.FANTOM,
-            signerOrProvider: provider,
-        });
-
-        expect(instance).to.not.be.null;
-    })
-
-    it("Make L1BridgeZap instance", function(this: Context) {
-        const provider = newProviderForNetwork(ChainId.ETH);
-        let instance = newL1BridgeZapInstance({
-            address: SynapseContracts.Ethereum.bridge_zap.address,
-            signerOrProvider: provider,
-        });
-
-        expect(instance).to.not.be.null;
-    })
-
-    it("Make L1BridgeZap entity instance", function(this: Context) {
-        const provider = newProviderForNetwork(ChainId.ETH);
-        let instance = l1BridgeZap({
-            chainId:          ChainId.ETH,
-            signerOrProvider: provider,
-        });
-
-        expect(instance).to.not.be.null;
-    })
-
-    it("Make L2BridgeZap instance", function(this: Context) {
-        const provider = newProviderForNetwork(ChainId.BSC);
-        let instance = newL2BridgeZapInstance({
-            address: SynapseContracts.BSC.bridge_zap.address,
-            signerOrProvider: provider,
-        });
-
-        expect(instance).to.not.be.null;
-    })
-
-    it("Make L2BridgeZap entity instance", function(this: Context) {
-        const provider = newProviderForNetwork(ChainId.BSC);
-        let instance = l2BridgeZap({
-            chainId:          ChainId.BSC,
-            signerOrProvider: provider,
-        });
-
-        expect(instance).to.not.be.null;
-    })
-})
+    });
+});
