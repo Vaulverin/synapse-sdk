@@ -18,6 +18,8 @@ export namespace Networks {
     const tokenSupportChecks: supportedTokenEdgeCase[] = [
         {chainId: ChainId.ETH,       token: Tokens.WETH},
         {chainId: ChainId.ETH,       token: Tokens.NETH},
+        {chainId: ChainId.ARBITRUM, token: Tokens.ETH},
+        {chainId: ChainId.ARBITRUM, token: Tokens.WETH},
         {chainId: ChainId.AVALANCHE, token: Tokens.AVAX},
         {chainId: ChainId.AVALANCHE, token: Tokens.WAVAX},
         {chainId: ChainId.AVALANCHE, token: Tokens.AVWETH},
@@ -27,11 +29,11 @@ export namespace Networks {
         {chainId: ChainId.DFK,       token: Tokens.JEWEL},
     ];
 
-    const checkWrappedToken = (chainId: ChainId, token: Token): boolean => {
+    export const checkWrappedToken = (chainId: ChainId, token: Token): boolean => {
         let check = tokenSupportChecks.find((check) =>
             check.chainId === chainId && check.token.isEqual(token)
         );
-        
+
         return typeof check !== "undefined"
     }
 

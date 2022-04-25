@@ -73,6 +73,18 @@ export namespace Tokens {
         swapType: SwapType.USD
     });
 
+    export const USDC_REAL = new BaseToken({
+        name:   "USDC",
+        symbol: "USDC",
+        decimals: {
+            [ChainId.AVALANCHE]: 6,
+        },
+        addresses: {
+            [ChainId.AVALANCHE]: "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E",
+        },
+        swapType: SwapType.USD
+    });
+
     export const USDT = new BaseToken({
         name:     "USD Tether",
         symbol:   "USDT",
